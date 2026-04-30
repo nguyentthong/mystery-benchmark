@@ -109,43 +109,100 @@ class ProceduralSprites(SpriteLoader):
         discovered: bool,
         evidence_state: EvidenceState | None,
     ) -> None:
+        if evidence_state in (EvidenceState.HIDDEN, EvidenceState.DESTROYED):
+            return
+        if obj.is_weapon:
+            self._draw_weapon(surface, rect)
+        elif obj.evidence_id and discovered:
+            self._draw_magnifier(surface, rect)
+        elif obj.evidence_id:
+            self._draw_evidence_box(surface, rect)
+        else:
+            self._draw_chair(surface, rect)
+
+    # ---- pictographs ------------------------------------------------
+
+    @staticmethod
+    def _draw_weapon(surface: pygame.Surface, rect: pygame.Rect) -> None:
+        cx, cy = rect.center
+        size = int(min(rect.w, rect.h) * 0.7)
+        # Dagger silhouette: blade triangle on top of crossguard + handle
+        blade_top = (cx, cy - size // 2)
+        blade_mid_l = (cx - size // 8, cy + size // 8)
+        blade_mid_r = (cx + size // 8, cy + size // 8)
+        pygame.draw.polygon(surface, (210, 210, 220), [blade_top, blade_mid_l, blade_mid_r])
+        pygame.draw.polygon(surface, (40, 20, 20), [blade_top, blade_mid_l, blade_mid_r], 2)
+        # Crossguard
+        pygame.draw.rect(
+            surface, WEAPON_COLOR,
+            (cx - size // 3, cy + size // 8, 2 * size // 3, size // 12),
+        )
+        # Handle
+        pygame.draw.rect(
+            surface, (90, 50, 30),
+            (cx - size // 12, cy + size // 8 + size // 12, size // 6, size // 4),
+        )
+        pygame.draw.rect(
+            surface, (40, 20, 20),
+            (cx - size // 12, cy + size // 8 + size // 12, size // 6, size // 4), 1,
+        )
+
+    @staticmethod
+    def _draw_magnifier(surface: pygame.Surface, rect: pygame.Rect) -> None:
+        cx, cy = rect.center
+        radius = int(min(rect.w, rect.h) * 0.27)
+        # Lens
+        pygame.draw.circle(surface, (200, 230, 255), (cx - 2, cy - 2), radius)
+        pygame.draw.circle(surface, EVIDENCE_COLOR, (cx - 2, cy - 2), radius, 3)
+        # Handle
+        end = (cx + radius, cy + radius)
+        pygame.draw.line(surface, (90, 50, 30), (cx + 2, cy + 2), end, 5)
+
+    @staticmethod
+    def _draw_evidence_box(surface: pygame.Surface, rect: pygame.Rect) -> None:
         cx, cy = rect.center
         size = int(min(rect.w, rect.h) * 0.55)
         half = size // 2
+        # Cube body
+        pygame.draw.rect(
+            surface, OBJECT_COLOR,
+            (cx - half, cy - half, size, size), border_radius=3,
+        )
+        pygame.draw.rect(
+            surface, (40, 30, 10),
+            (cx - half, cy - half, size, size), 2, border_radius=3,
+        )
+        # Ribbon / band: two crossing strips
+        strip = max(2, size // 8)
+        pygame.draw.rect(surface, (160, 80, 50), (cx - strip // 2, cy - half, strip, size))
+        pygame.draw.rect(surface, (160, 80, 50), (cx - half, cy - strip // 2, size, strip))
 
-        if evidence_state in (EvidenceState.HIDDEN, EvidenceState.DESTROYED):
-            return  # not visible to the agent
+    @staticmethod
+    def _draw_chair(surface: pygame.Surface, rect: pygame.Rect) -> None:
+        cx, cy = rect.center
+        size = int(min(rect.w, rect.h) * 0.55)
+        half = size // 2
+        # Seat
+        pygame.draw.rect(
+            surface, OBJECT_COLOR,
+            (cx - half, cy - half // 4, size, half),
+            border_radius=2,
+        )
+        pygame.draw.rect(
+            surface, (40, 30, 10),
+            (cx - half, cy - half // 4, size, half), 2, border_radius=2,
+        )
+        # Backrest
+        back = pygame.Rect(cx - half, cy - half - 2, size, half + 2)
+        pygame.draw.rect(surface, OBJECT_COLOR, back, border_radius=2)
+        pygame.draw.rect(surface, (40, 30, 10), back, 2, border_radius=2)
+        # Inner backrest line for definition
+        pygame.draw.line(
+            surface, (40, 30, 10),
+            (cx, cy - half), (cx, cy - 2), 2,
+        )
 
-        if obj.is_weapon:
-            # Red diamond (rotated square)
-            pts = [(cx, cy - half), (cx + half, cy), (cx, cy + half), (cx - half, cy)]
-            pygame.draw.polygon(surface, WEAPON_COLOR, pts)
-            pygame.draw.polygon(surface, (40, 20, 20), pts, 2)
-        elif obj.evidence_id and discovered:
-            # Teal circle — discovered evidence
-            pygame.draw.circle(surface, EVIDENCE_COLOR, (cx, cy), half)
-            pygame.draw.circle(surface, (20, 60, 50), (cx, cy), half, 2)
-        elif obj.evidence_id:
-            # Tan square with corner mark — interactable but not yet examined
-            pygame.draw.rect(
-                surface, OBJECT_COLOR,
-                (cx - half, cy - half, size, size), border_radius=4,
-            )
-            pygame.draw.rect(
-                surface, (40, 30, 10),
-                (cx - half, cy - half, size, size), 2, border_radius=4,
-            )
-            pygame.draw.circle(surface, (40, 30, 10), (cx + half - 4, cy - half + 4), 3)
-        else:
-            # Plain tan square — non-evidence prop
-            pygame.draw.rect(
-                surface, OBJECT_COLOR,
-                (cx - half, cy - half, size, size), border_radius=4,
-            )
-            pygame.draw.rect(
-                surface, (40, 30, 10),
-                (cx - half, cy - half, size, size), 2, border_radius=4,
-            )
+    # ---- humanoid characters ---------------------------------------
 
     def draw_character(
         self,
@@ -153,46 +210,113 @@ class ProceduralSprites(SpriteLoader):
         rect: pygame.Rect,
         char: Character,
     ) -> None:
-        cx, cy = rect.center
-        radius = int(min(rect.w, rect.h) * 0.35)
         if not char.is_alive:
-            # Body: dark grey ellipse on the floor
-            pygame.draw.ellipse(
-                surface, VICTIM_COLOR,
-                (cx - radius, cy - radius // 2, 2 * radius, radius),
-            )
-            pygame.draw.ellipse(
-                surface, (20, 20, 30),
-                (cx - radius, cy - radius // 2, 2 * radius, radius), 2,
-            )
+            self._draw_victim(surface, rect)
             return
-        # Alive NPC: blue circle with a little face mark (eyes) so VLMs can
-        # distinguish "person" from "round object"
-        pygame.draw.circle(surface, NPC_COLOR, (cx, cy), radius)
-        pygame.draw.circle(surface, (20, 30, 60), (cx, cy), radius, 2)
-        eye = max(2, radius // 5)
-        pygame.draw.circle(surface, (20, 30, 60), (cx - radius // 3, cy - radius // 4), eye)
-        pygame.draw.circle(surface, (20, 30, 60), (cx + radius // 3, cy - radius // 4), eye)
+        # Hash the character id for deterministic colour variety
+        h = int(hashlib.sha1(char.id.encode()).hexdigest(), 16)
+        skin = [(255, 220, 180), (240, 200, 160), (220, 180, 130), (180, 130, 95), (140, 90, 60)][h % 5]
+        shirt = [(70, 130, 200), (180, 70, 80), (60, 140, 110), (180, 140, 60), (140, 90, 170)][(h // 5) % 5]
+        hair = [(40, 30, 20), (140, 90, 50), (220, 200, 110), (200, 100, 60), (120, 120, 130)][(h // 25) % 5]
+        self._draw_humanoid(surface, rect, skin=skin, shirt=shirt, hair=hair)
+
+    @staticmethod
+    def _draw_humanoid(
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        skin: tuple[int, int, int],
+        shirt: tuple[int, int, int],
+        hair: tuple[int, int, int],
+        hat_color: tuple[int, int, int] | None = None,
+    ) -> None:
+        """Top-down humanoid: head + shoulders + torso outline."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.85)
+        # Body / shoulders (rounded rect, slightly wider than head)
+        body_w = int(s * 0.55)
+        body_h = int(s * 0.45)
+        body = pygame.Rect(cx - body_w // 2, cy, body_w, body_h)
+        pygame.draw.rect(surface, shirt, body, border_radius=6)
+        pygame.draw.rect(surface, (20, 20, 30), body, 2, border_radius=6)
+        # Arms (small ovals on sides, slightly behind shoulders)
+        arm_r = int(s * 0.13)
+        pygame.draw.circle(surface, shirt, (body.left, cy + arm_r), arm_r)
+        pygame.draw.circle(surface, shirt, (body.right, cy + arm_r), arm_r)
+        pygame.draw.circle(surface, (20, 20, 30), (body.left, cy + arm_r), arm_r, 2)
+        pygame.draw.circle(surface, (20, 20, 30), (body.right, cy + arm_r), arm_r, 2)
+        # Head (circle at top)
+        head_r = int(s * 0.20)
+        head_cx, head_cy = cx, cy - head_r // 2
+        pygame.draw.circle(surface, skin, (head_cx, head_cy), head_r)
+        pygame.draw.circle(surface, (20, 20, 30), (head_cx, head_cy), head_r, 2)
+        # Hair: a cap on top half
+        hair_rect = pygame.Rect(head_cx - head_r, head_cy - head_r, 2 * head_r, head_r)
+        pygame.draw.ellipse(surface, hair, hair_rect)
+        pygame.draw.ellipse(surface, (20, 20, 30), hair_rect, 1)
+        # Optional hat overlay (used by player avatar)
+        if hat_color is not None:
+            brim = pygame.Rect(head_cx - head_r - 2, head_cy - head_r // 2, 2 * head_r + 4, 4)
+            pygame.draw.rect(surface, hat_color, brim)
+            crown = pygame.Rect(head_cx - head_r * 3 // 4, head_cy - head_r - 4, head_r * 3 // 2, head_r)
+            pygame.draw.rect(surface, hat_color, crown, border_radius=2)
+            pygame.draw.rect(surface, (20, 20, 30), crown, 1, border_radius=2)
+        # Tiny eye dots for friendliness
+        eye = max(1, head_r // 5)
+        pygame.draw.circle(surface, (20, 20, 30), (head_cx - head_r // 3, head_cy + head_r // 6), eye)
+        pygame.draw.circle(surface, (20, 20, 30), (head_cx + head_r // 3, head_cy + head_r // 6), eye)
+
+    @staticmethod
+    def _draw_victim(surface: pygame.Surface, rect: pygame.Rect) -> None:
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.8)
+        # Body lying down (horizontal ellipse) with separate head circle
+        body = pygame.Rect(cx - s // 2, cy - s // 6, s, s // 3)
+        pygame.draw.ellipse(surface, VICTIM_COLOR, body)
+        pygame.draw.ellipse(surface, (20, 20, 30), body, 2)
+        # Head off to one side
+        head_r = s // 6
+        pygame.draw.circle(surface, (180, 160, 150), (cx - s // 2 + head_r // 2, cy), head_r)
+        pygame.draw.circle(surface, (20, 20, 30), (cx - s // 2 + head_r // 2, cy), head_r, 2)
+        # X-eyes to make "deceased" unambiguous
+        pygame.draw.line(surface, (120, 30, 30), (cx - s // 2 + 2, cy - 3), (cx - s // 2 + 8, cy + 3), 2)
+        pygame.draw.line(surface, (120, 30, 30), (cx - s // 2 + 2, cy + 3), (cx - s // 2 + 8, cy - 3), 2)
 
     def draw_player(self, surface: pygame.Surface, cx: int, cy: int, radius: int) -> None:
-        pygame.draw.circle(surface, PLAYER_OUTLINE, (cx, cy), radius + 2)
-        pygame.draw.circle(surface, PLAYER_COLOR, (cx, cy), radius)
-        # Forward triangle so orientation/identity is unambiguous
-        pts = [(cx, cy - radius - 4), (cx - 5, cy - radius + 2), (cx + 5, cy - radius + 2)]
-        pygame.draw.polygon(surface, PLAYER_OUTLINE, pts)
+        # Reuse the humanoid renderer with detective styling
+        rect = pygame.Rect(cx - radius * 2, cy - radius * 2, radius * 4, radius * 4)
+        self._draw_humanoid(
+            surface, rect,
+            skin=(240, 210, 175),
+            shirt=(60, 90, 140),     # detective coat
+            hair=(40, 25, 15),
+            hat_color=(30, 30, 40),  # dark fedora
+        )
 
 
 # ---------------------------------------------------------------------------
 # Emoji sprite loader (default — uses Noto Color Emoji for real-world icons)
 # ---------------------------------------------------------------------------
 
-# Common Linux paths for Noto Color Emoji. None of macOS / Windows have it
-# at a predictable path; on those, the loader auto-falls-back to procedural.
+# Cross-platform paths for colour-emoji fonts. We probe each in order; the
+# first that exists AND actually renders a colour glyph wins. On macOS,
+# Apple Color Emoji uses the sbix format which older SDL_ttf builds can't
+# rasterise — the at-startup self-test below catches that case and falls
+# back to ProceduralSprites.
 _EMOJI_FONT_CANDIDATES = [
+    # Linux (Noto Color Emoji)
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
     "/usr/share/fonts/noto/NotoColorEmoji.ttf",
     "/usr/share/fonts/google-noto/NotoColorEmoji.ttf",
     "/usr/share/fonts/truetype/noto-color-emoji/NotoColorEmoji.ttf",
+    # macOS (Apple Color Emoji)
+    "/System/Library/Fonts/Apple Color Emoji.ttc",
+    "/Library/Fonts/Apple Color Emoji.ttc",
+    str(Path.home() / "Library/Fonts/Apple Color Emoji.ttc"),
+    # Windows (Segoe UI Emoji)
+    "C:\\Windows\\Fonts\\seguiemj.ttf",
+    # User-local Noto installs
+    str(Path.home() / ".fonts/NotoColorEmoji.ttf"),
+    str(Path.home() / ".local/share/fonts/NotoColorEmoji.ttf"),
 ]
 
 # Pool of "person" emoji to give NPCs visual variety. Single-codepoint glyphs
@@ -235,10 +359,42 @@ class EmojiSprites(SpriteLoader):
         self._font: pygame.font.Font | None = None
         self._cache: dict[tuple[str, int], pygame.Surface | None] = {}
         if self._font_path:
+            self._font = self._try_load_font(self._font_path)
+
+    @classmethod
+    def _try_load_font(cls, path: str) -> pygame.font.Font | None:
+        """Load the font, then self-test that it actually renders a colour
+        glyph. Some platforms can open Apple Color Emoji but produce all-black
+        bitmaps — we treat that as a failure and fall back to procedural."""
+        # Try several sizes; bitmap colour fonts are picky.
+        for size in (cls._NATIVE_SIZE, 64, 48, 32):
             try:
-                self._font = pygame.font.Font(self._font_path, self._NATIVE_SIZE)
+                font = pygame.font.Font(path, size)
+                surf = font.render("🧑", True, (255, 255, 255))
+                if cls._surface_is_colourful(surf):
+                    return font
             except Exception:
-                self._font = None
+                continue
+        return None
+
+    @staticmethod
+    def _surface_is_colourful(surf: pygame.Surface) -> bool:
+        """A successful colour emoji render has multiple non-grey pixels.
+        A failed render is either empty, a black box, or monochrome tofu."""
+        if surf.get_width() < 4 or surf.get_height() < 4:
+            return False
+        # Sample a small grid of pixels; if any has notable colour saturation,
+        # we have a real emoji glyph.
+        sx = max(1, surf.get_width() // 12)
+        sy = max(1, surf.get_height() // 12)
+        for x in range(0, surf.get_width(), sx):
+            for y in range(0, surf.get_height(), sy):
+                px = surf.get_at((x, y))
+                r, g, b = px[0], px[1], px[2]
+                # Saturated pixel (max channel - min channel large enough)
+                if max(r, g, b) - min(r, g, b) > 40:
+                    return True
+        return False
 
     @property
     def available(self) -> bool:

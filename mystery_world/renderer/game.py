@@ -136,6 +136,8 @@ class MysteryGame:
         # Persistent UI state — tab + per-tab scroll offset
         self.active_tab: int = TAB_CASE
         self._scroll: dict[int, int] = {TAB_CASE: 0, TAB_INTERVIEWS: 0, TAB_EVIDENCE: 0}
+        # Separate scroll for the post-game solution screen
+        self._endscreen_scroll: int = 0
 
         # Track last-seen room per character for the Case File tab
         self.last_seen: dict[str, str] = {}
@@ -744,33 +746,182 @@ class MysteryGame:
         for i, item in enumerate(items):
             self.screen.blit(self.font_md.render(item, True, HUD_TEXT), (box.x + 16, box.y + 40 + i * 28))
 
-    def _draw_endscreen(self) -> None:
-        if not self.env.is_solved and self.env.budget_remaining > 0:
-            return
-        summary = self.env.get_episode_summary()
-        culprit = self.state.get_culprit()
-        weapon = self.state.objects.get(self.state.murder_weapon_id)
-        room = self.state.locations.get(self.state.murder_location_id)
+    def _is_episode_over(self) -> bool:
+        return self.env.is_solved or self.env.budget_remaining <= 0
 
-        verdict = "CASE CLOSED" if summary.get("accusation_correct") else "CASE FAILED"
-        lines = [
-            verdict,
-            "",
-            f"True answer : {culprit.full_name if culprit else '?'}"
-            f" / {weapon.name if weapon else '?'}"
-            f" / {room.name if room else '?'}",
-            f"Actions used : {summary.get('actions_taken', '?')} / {summary.get('budget', '?')}",
-            "",
-            "Press ESC to exit.",
+    def _build_solution_lines(self) -> list[tuple[str, tuple[int, int, int]]]:
+        """Full Watson-style reveal: who, why, weapon, room, evidence chain,
+        alibi, innocents' corroborators, and score breakdown."""
+        from mystery_world.entities import CharacterRole, EdgeType
+
+        state = self.state
+        env = self.env
+        lines: list[tuple[str, tuple[int, int, int]]] = []
+
+        def H(t: str) -> None: lines.append((t, HUD_TEXT))
+        def D(t: str) -> None: lines.append((t, HUD_DIM))
+        def BL() -> None: lines.append(("", HUD_DIM))
+
+        summary = env.get_episode_summary()
+        score = summary.get("score_result") or {}
+
+        culprit = state.get_culprit()
+        weapon = state.objects.get(state.murder_weapon_id)
+        room = state.locations.get(state.murder_location_id)
+        body_loc = state.locations.get(state.body_location_id)
+
+        # Verdict + composite
+        if env.is_solved and summary.get("accusation_correct"):
+            H("✓ CASE CLOSED — your accusation was correct.")
+        elif env.is_solved:
+            H("✗ CASE FAILED — your accusation was wrong.")
+        else:
+            H("⏳ TIME RAN OUT — you exhausted your action budget.")
+        if score:
+            D(f"  composite score: {score.get('composite_score', 0):.3f}")
+        BL()
+
+        # The truth
+        H("THE TRUTH")
+        if culprit:
+            D(f"  Culprit: {culprit.full_name}")
+            if culprit.motive:
+                D(f"  Motive:  {culprit.motive}")
+        D(f"  Weapon:  {weapon.name if weapon else '?'}")
+        D(f"  Where:   {room.name if room else '?'}"
+          + (f"  (body found in {body_loc.name})" if body_loc and body_loc.id != state.murder_location_id else ""))
+        D(f"  When:    step {state.murder_step}")
+        BL()
+
+        # Locard triangle
+        H("LOCARD TRIANGLE — evidence that solved each edge")
+        edges = [
+            (EdgeType.SUSPECT_WEAPON, "Suspect ↔ Weapon"),
+            (EdgeType.WEAPON_VICTIM,  "Weapon  ↔ Victim"),
+            (EdgeType.SUSPECT_ROOM,   "Suspect ↔ Room"),
         ]
+        for edge_type, label in edges:
+            valid = [
+                ev for ev in state.evidence.values()
+                if not ev.is_red_herring
+                and ev.relevance is not None
+                and ev.relevance.edge_type == edge_type
+                and abs(ev.relevance.contact_timestamp - state.murder_timestamp) < state.freshness_threshold
+            ]
+            H(f"  {label}")
+            if not valid:
+                D("    (no fresh evidence of this kind in the world)")
+                continue
+            for ev in valid:
+                loc = state.locations.get(ev.location_id)
+                marker = "✓" if ev.id in env._discovered_evidence else "·"
+                D(f"    {marker} [{ev.id}] {ev.name}  — {loc.name if loc else '?'}")
+                for line in self._wrap("        " + ev.description, 80):
+                    D(line)
+        BL()
+
+        # Alibi contradiction
+        H("THE ALIBI")
+        if culprit and culprit.alibi_claims:
+            for claim in culprit.alibi_claims:
+                D(f"  Claimed: {culprit.full_name} said they were at {claim.location_name} at {claim.clock_time_str}")
+            if culprit.alibi_corroborator_id:
+                corr = state.characters.get(culprit.alibi_corroborator_id)
+                genuine = "(genuine)" if culprit.alibi_corroboration_is_genuine else "(LYING)"
+                D(f"  Corroborator: {corr.full_name if corr else '?'}  {genuine}")
+            else:
+                D("  Corroborator: none — claim was uncorroborated")
+            D(f"  Why it's a lie: at step {state.murder_step}, the culprit was actually in {room.name if room else '?'}.")
+        else:
+            D("  (Culprit had no formal alibi.)")
+        BL()
+
+        # Innocents' alibis
+        H("INNOCENTS — who was where, and who confirmed it")
+        innocents = [
+            c for c in state.characters.values()
+            if CharacterRole.SUSPECT in c.roles and not c.is_culprit and c.is_alive
+        ]
+        if not innocents:
+            D("  (No alibi'd innocents in this case.)")
+        for c in sorted(innocents, key=lambda x: x.full_name):
+            corr = state.characters.get(c.alibi_corroborator_id) if c.alibi_corroborator_id else None
+            corr_str = f" (witnessed by {corr.full_name})" if corr else " (uncorroborated)"
+            D(f"  · {c.full_name}{corr_str}")
+            for claim in c.alibi_claims:
+                D(f"      at {claim.clock_time_str}: {claim.location_name}")
+        BL()
+
+        # Score breakdown (only meaningful if an ACCUSE happened)
+        if score:
+            H("SCORE BREAKDOWN")
+            D(f"  accusation:    {score.get('accusation_score', 0):.2f}    "
+              f"(suspect={int(score.get('correct_suspect', 0))}, "
+              f"weapon={int(score.get('correct_weapon', 0))}, "
+              f"room={int(score.get('correct_room', 0))})")
+            D(f"  triangle (sum of 3 F1s, max 3.0): {score.get('triangle_score', 0):.2f}")
+            D(f"     suspect↔weapon F1: {score.get('suspect_weapon_score', 0):.2f}"
+              f"   precision={score.get('suspect_weapon_precision', 0):.2f}"
+              f"   recall={score.get('suspect_weapon_recall', 0):.2f}")
+            D(f"     weapon↔victim  F1: {score.get('weapon_victim_score', 0):.2f}"
+              f"   precision={score.get('weapon_victim_precision', 0):.2f}"
+              f"   recall={score.get('weapon_victim_recall', 0):.2f}")
+            D(f"     suspect↔room   F1: {score.get('suspect_room_score', 0):.2f}"
+              f"   precision={score.get('suspect_room_precision', 0):.2f}"
+              f"   recall={score.get('suspect_room_recall', 0):.2f}")
+            D(f"  alibi:         {score.get('alibi_score', 0):.2f}    "
+              f"(cited={int(score.get('alibi_cited', 0))}, "
+              f"contradiction-valid={int(score.get('contradiction_valid', 0))})")
+            D(f"  elimination:   {score.get('elimination_score', 0):.2f}    "
+              f"({score.get('correct_eliminations', 0)} correct, "
+              f"{score.get('incorrect_eliminations', 0)} wrong, "
+              f"of {score.get('total_innocents', 0)} innocents)")
+            D(f"  COMPOSITE:     {score.get('composite_score', 0):.3f}")
+            BL()
+
+        H("Actions used: "
+          f"{summary.get('actions_taken', '?')} / {summary.get('budget', '?')}    "
+          f"Evidence found: {len(summary.get('evidence_discovered', []))}    "
+          f"Interviews: {len(summary.get('characters_interviewed', []))}")
+        BL()
+        H("Press ↑/↓ or PgUp/PgDn to scroll · ESC to exit")
+        return lines
+
+    def _draw_endscreen(self) -> None:
+        if not self._is_episode_over():
+            return
+        # Full-window dimmed overlay
         overlay = pygame.Surface((self.win_w, self.win_h), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 200))
+        overlay.fill((0, 0, 0, 220))
         self.screen.blit(overlay, (0, 0))
-        for i, line in enumerate(lines):
-            font = self.font_lg if i == 0 else self.font_md
-            surf = font.render(line, True, HUD_TEXT)
-            rect = surf.get_rect(center=(self.win_w // 2, self.win_h // 2 - 80 + i * 28))
-            self.screen.blit(surf, rect)
+
+        # Title bar at the top of the overlay
+        title_h = 60
+        title_rect = pygame.Rect(40, 30, self.win_w - 80, title_h)
+        pygame.draw.rect(self.screen, PROMPT_BG, title_rect)
+        pygame.draw.rect(self.screen, PROMPT_BORDER, title_rect, 2)
+        summary = self.env.get_episode_summary()
+        if self.env.is_solved and summary.get("accusation_correct"):
+            verdict = "CASE CLOSED"
+        elif self.env.is_solved:
+            verdict = "CASE FAILED"
+        else:
+            verdict = "TIME RAN OUT"
+        self.screen.blit(
+            self.font_xl.render(verdict, True, HUD_TEXT),
+            self.font_xl.render(verdict, True, HUD_TEXT).get_rect(center=title_rect.center),
+        )
+
+        # Solution body — scrollable
+        body = pygame.Rect(
+            40, 30 + title_h + 12,
+            self.win_w - 80, self.win_h - (30 + title_h + 12) - 30,
+        )
+        pygame.draw.rect(self.screen, HUD_BG, body)
+        pygame.draw.rect(self.screen, PROMPT_BORDER, body, 1)
+        # Pad the body a bit so text doesn't kiss the border
+        inner = body.inflate(-16, -16)
+        self._render_lines(inner, self._build_solution_lines(), self._endscreen_scroll)
 
     # ------------------------------------------------------------------
     # Main loop
@@ -795,6 +946,16 @@ class MysteryGame:
                     continue
 
                 if event.type == pygame.KEYDOWN:
+                    # Once the episode is over, the end-screen owns input.
+                    if self._is_episode_over():
+                        if event.key == MENU_KEY:
+                            self.running = False
+                        elif event.key in (pygame.K_UP, pygame.K_PAGEUP):
+                            self._endscreen_scroll = max(0, self._endscreen_scroll - 36)
+                        elif event.key in (pygame.K_DOWN, pygame.K_PAGEDOWN):
+                            self._endscreen_scroll += 36
+                        continue
+
                     if self.menu_open:
                         self._menu_action(event.key)
                         continue
