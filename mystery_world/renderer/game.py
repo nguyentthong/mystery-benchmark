@@ -46,9 +46,9 @@ from mystery_world.world import AgentAction, MysteryEnvironment
 # ---------------------------------------------------------------------------
 
 TILE_PX = 44
-TOPBAR_H = 36           # top status bar
-STATUS_H = 64           # bottom 2-line status (last action result)
-SIDEBAR_W = 380         # right notebook (Case File / Interviews / Evidence)
+TOPBAR_H = 44           # top status bar
+STATUS_H = 76           # bottom 2-line status (last action result)
+SIDEBAR_W = 460         # right notebook (Case File / Interviews / Evidence)
 TAB_BAR_H = 32          # tab strip at top of sidebar
 PLAYER_SPEED_PX = 220   # pixels per second
 INTERACT_KEY = pygame.K_e
@@ -186,10 +186,10 @@ class MysteryGame:
         else:
             self.screen = pygame.display.set_mode((self.win_w, self.win_h))
         self.clock = pygame.time.Clock()
-        self.font_sm = pygame.font.SysFont("dejavusansmono,monospace", 13)
-        self.font_md = pygame.font.SysFont("dejavusansmono,monospace", 15)
-        self.font_lg = pygame.font.SysFont("dejavusansmono,monospace", 18, bold=True)
-        self.font_xl = pygame.font.SysFont("dejavusansmono,monospace", 22, bold=True)
+        self.font_sm = pygame.font.SysFont("dejavusansmono,monospace", 16)
+        self.font_md = pygame.font.SysFont("dejavusansmono,monospace", 18)
+        self.font_lg = pygame.font.SysFont("dejavusansmono,monospace", 22, bold=True)
+        self.font_xl = pygame.font.SysFont("dejavusansmono,monospace", 28, bold=True)
 
     def _update_last_seen(self) -> None:
         """Record where each character is right now (called each step)."""
@@ -727,7 +727,7 @@ class MysteryGame:
         clip = self.screen.get_clip()
         self.screen.set_clip(body)
         y = body.y + 8 - scroll
-        line_h = 18
+        line_h = 22
         for text, color in lines:
             if y + line_h >= body.y and y < body.bottom:
                 surf = self.font_sm.render(text, True, color)
@@ -769,9 +769,7 @@ class MysteryGame:
         ]
         for s in sorted(suspects, key=lambda c: c.full_name):
             seen = self.last_seen.get(s.id, "?")
-            interviewed = s.id in self.env._interviewed_characters
-            mark = "[OK]" if interviewed else "[--]"
-            _h(f"  {mark} {s.full_name}")
+            _h(f"  {s.full_name}")
             _b(f"      last seen: {seen}")
             if s.motive:
                 for line in self._wrap(f"motive: {s.motive}", body_w_chars - 6):
@@ -787,9 +785,7 @@ class MysteryGame:
         ]
         for s in sorted(innocents, key=lambda c: c.full_name):
             seen = self.last_seen.get(s.id, "?")
-            interviewed = s.id in self.env._interviewed_characters
-            mark = "[OK]" if interviewed else "[--]"
-            _b(f"  {mark} {s.full_name}  ({seen})")
+            _b(f"  {s.full_name}  ({seen})")
         lines.append(("", HUD_DIM))
 
         if loc:
