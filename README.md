@@ -1,3 +1,14 @@
+---
+title: MysteryArena
+emoji: 🔎
+colorFrom: indigo
+colorTo: gray
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+---
+
 # MysteryArena — Procedural Murder-Mystery Benchmark
 
 A fully-automated benchmark for evaluating LLM-based detective agents on procedurally generated murder-mystery scenarios. Agents must determine **who** committed the murder, **what** weapon was used, and **where** it occurred — under partial observability, within an action budget, against NPCs that may lie.
