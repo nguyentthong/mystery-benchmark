@@ -148,7 +148,7 @@ class MysteryGame:
 
         # HUD state
         self.briefing: str = render_initial_briefing(env)
-        self.last_observation: str = "Click WASD to walk · E to interact · ESC for menu · 1/2/3 to switch tabs"
+        self.last_observation: str = "WASD = walk  |  E = interact  |  ESC = menu  |  1/2/3 = switch tab"
         self.toast: str = ""
         self.toast_until_ms: int = 0
 
@@ -572,7 +572,7 @@ class MysteryGame:
         self.screen.blit(halo, (cx - TILE_PX, cy - TILE_PX))
         self.sprites.draw_player(self.screen, cx, cy, TILE_PX // 3)
         # YOU label — bold, gold
-        self._draw_label("◆ YOU", cx, cy + TILE_PX // 2 - 4, color=(255, 220, 90))
+        self._draw_label("** YOU **", cx, cy + TILE_PX // 2 - 4, color=(255, 220, 90))
 
     def _draw_topbar(self) -> None:
         bar = pygame.Rect(0, 0, self.win_w, TOPBAR_H)
@@ -583,8 +583,8 @@ class MysteryGame:
         victim = self.state.characters.get(self.state.victim_id)
         v_name = victim.full_name if victim else "?"
         text = (
-            f" 🕵️  {loc_name}     ⏱ step {self.state.current_step}     "
-            f"⚖ budget {self.env.budget_remaining}     ☠ victim: {v_name}"
+            f"  {loc_name}    |    step {self.state.current_step}    |    "
+            f"budget {self.env.budget_remaining}    |    victim: {v_name}"
         )
         self.screen.blit(self.font_lg.render(text, True, HUD_TEXT), (8, 8))
 
@@ -726,7 +726,7 @@ class MysteryGame:
         for s in sorted(suspects, key=lambda c: c.full_name):
             seen = self.last_seen.get(s.id, "?")
             interviewed = s.id in self.env._interviewed_characters
-            mark = "✓" if interviewed else "•"
+            mark = "[x]" if interviewed else "[ ]"
             _h(f"  {mark} {s.full_name}")
             _b(f"      last seen: {seen}")
             if s.motive:
@@ -744,35 +744,35 @@ class MysteryGame:
         for s in sorted(innocents, key=lambda c: c.full_name):
             seen = self.last_seen.get(s.id, "?")
             interviewed = s.id in self.env._interviewed_characters
-            mark = "✓" if interviewed else "•"
+            mark = "[x]" if interviewed else "[ ]"
             _b(f"  {mark} {s.full_name}  ({seen})")
         lines.append(("", HUD_DIM))
 
         if loc:
-            _h(f"HERE — {loc.name}")
+            _h(f"HERE -- {loc.name}")
             for cid in loc.characters_here:
                 ch = self.state.characters.get(cid)
                 if ch:
-                    _b(f"  · {ch.full_name}{'' if ch.is_alive else ' (deceased)'}")
+                    _b(f"  - {ch.full_name}{'' if ch.is_alive else ' (deceased)'}")
             for oid in loc.objects_here:
                 obj = self.state.objects.get(oid)
                 if obj:
-                    _b(f"  – {obj.name}")
+                    _b(f"  - {obj.name}")
             lines.append(("", HUD_DIM))
             _h("EXITS")
             for aid in loc.adjacent_ids:
                 adj = self.state.locations.get(aid)
                 if adj:
-                    _b(f"  → {adj.name}")
+                    _b(f"  -> {adj.name}")
             lines.append(("", HUD_DIM))
 
         _h("CONTROLS")
         for ln in [
-            "WASD  walk",
-            "E     interact",
-            "1/2/3 switch tab",
-            "↑↓    scroll tab",
-            "ESC   menu",
+            "WASD     walk",
+            "E        interact",
+            "1/2/3    switch tab",
+            "Up/Down  scroll tab",
+            "ESC      menu",
         ]:
             _b(f"  {ln}")
 
@@ -793,7 +793,7 @@ class MysteryGame:
                 if not char:
                     continue
                 lines.append((char.full_name.upper(), HUD_TEXT))
-                lines.append(("─" * (body_w_chars - 2), HUD_DIM))
+                lines.append(("-" * (body_w_chars - 2), HUD_DIM))
                 for msg in hist:
                     role = msg.get("role", "user")
                     content = msg.get("content", "")
@@ -823,7 +823,7 @@ class MysteryGame:
                 edge = ev.relevance.edge_type.name if ev.relevance else "—"
                 loc = self.state.locations.get(ev.location_id)
                 loc_name = loc.name if loc else "?"
-                lines.append((f"  {ev.evidence_type.name.lower()} · {edge} · {loc_name}", HUD_DIM))
+                lines.append((f"  {ev.evidence_type.name.lower()} | {edge} | {loc_name}", HUD_DIM))
                 for line in self._wrap(ev.description, body_w_chars - 4):
                     lines.append(("  " + line, HUD_DIM))
                 lines.append(("", HUD_DIM))
@@ -849,7 +849,7 @@ class MysteryGame:
         pygame.draw.rect(self.screen, HUD_BG, field)
         pygame.draw.rect(self.screen, HUD_BORDER, field, 2)
         cursor = "_" if (pygame.time.get_ticks() // 500) % 2 else " "
-        display = ("•" * len(self.modal.text)) if self.modal.mask else self.modal.text
+        display = ("*" * len(self.modal.text)) if self.modal.mask else self.modal.text
         self.screen.blit(
             self.font_md.render(display + cursor, True, HUD_TEXT),
             (field.x + 8, field.y + 10),
@@ -881,10 +881,10 @@ class MysteryGame:
 
     @staticmethod
     def _star_rating(score: float) -> str:
-        """Composite 0..1 → 0..5 stars (rounded to nearest)."""
+        """Composite 0..1 -> 0..5 stars (rounded to nearest). ASCII-safe."""
         score = max(0.0, min(1.0, float(score or 0.0)))
         n = round(score * 5)
-        return "★" * n + "☆" * (5 - n)
+        return "*" * n + "." * (5 - n)
 
     def _build_solution_lines(self) -> list[tuple[str, tuple[int, int, int]]]:
         """Detective-novel reveal — gamer-friendly story first, numbers last."""
@@ -919,7 +919,7 @@ class MysteryGame:
         def hdr(text: str) -> None:
             lines.append(("", HUD_DIM))
             lines.append((text, GOLD))
-            lines.append(("─" * 42, HUD_DIM))
+            lines.append(("-" * 42, HUD_DIM))
 
         def body(text: str, color: tuple[int, int, int] = HUD_TEXT) -> None:
             for line in self._wrap(text, 78):
@@ -928,7 +928,7 @@ class MysteryGame:
         def bullet(text: str, color: tuple[int, int, int] = HUD_TEXT) -> None:
             wrapped = self._wrap(text, 74)
             if wrapped:
-                lines.append(("  •  " + wrapped[0], color))
+                lines.append(("  *  " + wrapped[0], color))
                 for cont in wrapped[1:]:
                     lines.append(("     " + cont, color))
 
@@ -989,9 +989,9 @@ class MysteryGame:
         # ── The trail of evidence ──
         hdr("THE TRAIL OF EVIDENCE")
         edges = [
-            (EdgeType.SUSPECT_WEAPON, "[1]  Linking the killer to the weapon"),
-            (EdgeType.WEAPON_VICTIM,  "[2]  Linking the weapon to the victim"),
-            (EdgeType.SUSPECT_ROOM,   "[3]  Placing the killer at the scene"),
+            (EdgeType.SUSPECT_WEAPON, "[1] Linking the killer to the weapon"),
+            (EdgeType.WEAPON_VICTIM,  "[2] Linking the weapon to the victim"),
+            (EdgeType.SUSPECT_ROOM,   "[3] Placing the killer at the scene"),
         ]
         for edge_type, label in edges:
             valid = [
@@ -1031,11 +1031,11 @@ class MysteryGame:
 
         # ── Try next ──
         hdr("WHAT'S NEXT?")
-        push("  •  Replay this case — see if you can solve it cleaner")
-        push(f"  •  Try seed {state.seed + 1} — same difficulty, fresh case")
-        push("  •  Step up to the next difficulty for a real challenge")
+        push("  *  Replay this case -- see if you can solve it cleaner")
+        push(f"  *  Try seed {state.seed + 1} -- same difficulty, fresh case")
+        push("  *  Step up to the next difficulty for a real challenge")
         push("")
-        push("  Press ↑/↓ or PgUp/PgDn to scroll · ESC to exit", HUD_DIM)
+        push("  Press Up/Down or PgUp/PgDn to scroll  |  ESC to exit", HUD_DIM)
 
         # ── For the curious: technical breakdown ──
         if score:
@@ -1046,9 +1046,9 @@ class MysteryGame:
                  f"   weapon={int(score.get('correct_weapon', 0))}"
                  f"   room={int(score.get('correct_room', 0))}", HUD_DIM)
             push(f"  Locard triangle:", HUD_DIM)
-            push(f"    suspect ↔ weapon  F1 = {score.get('suspect_weapon_score', 0):.2f}", HUD_DIM)
-            push(f"    weapon  ↔ victim  F1 = {score.get('weapon_victim_score', 0):.2f}", HUD_DIM)
-            push(f"    suspect ↔ room    F1 = {score.get('suspect_room_score', 0):.2f}", HUD_DIM)
+            push(f"    suspect <-> weapon  F1 = {score.get('suspect_weapon_score', 0):.2f}", HUD_DIM)
+            push(f"    weapon  <-> victim  F1 = {score.get('weapon_victim_score', 0):.2f}", HUD_DIM)
+            push(f"    suspect <-> room    F1 = {score.get('suspect_room_score', 0):.2f}", HUD_DIM)
             push(f"  Alibi consistency:      {score.get('alibi_score', 0):.2f}", HUD_DIM)
             push(f"  Innocent eliminations:  {score.get('elimination_score', 0):.2f}", HUD_DIM)
         return lines
