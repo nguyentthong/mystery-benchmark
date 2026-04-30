@@ -150,11 +150,9 @@ async def _log_unhandled(request: Request, exc: Exception) -> HTMLResponse:
 @app.get("/", response_class=HTMLResponse)
 async def lobby(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
+        request,
         "lobby.html",
-        {
-            "request": request,
-            "levels": [lvl.name for lvl in ComplexityLevel],
-        },
+        {"levels": [lvl.name for lvl in ComplexityLevel]},
     )
 
 
@@ -180,9 +178,9 @@ async def game_page(request: Request, session_id: str) -> HTMLResponse:
     if sess is None:
         return RedirectResponse(url="/")
     return templates.TemplateResponse(
+        request,
         "game.html",
         {
-            "request": request,
             "session_id": session_id,
             "level": sess.level,
             "seed": sess.seed,
