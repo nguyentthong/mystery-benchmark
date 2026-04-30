@@ -76,13 +76,18 @@ class Modal:
     prompt: str
     on_submit: Callable[[str], None]
     text: str = ""
+    mask: bool = False                # True → render input as asterisks (API key)
+    allow_empty: bool = True          # True → ENTER on empty input still submits
 
     def handle_key(self, event: pygame.event.Event) -> bool:
         """Return True when the modal should close."""
         if event.type != pygame.KEYDOWN:
             return False
         if event.key == pygame.K_RETURN:
-            self.on_submit(self.text.strip())
+            value = self.text.strip()
+            if not value and not self.allow_empty:
+                return False
+            self.on_submit(value)
             return True
         if event.key == pygame.K_ESCAPE:
             return True
@@ -165,6 +170,71 @@ class MysteryGame:
             loc = self.state.locations.get(char.location_id)
             if loc:
                 self.last_seen[cid] = loc.name
+
+    # ------------------------------------------------------------------
+    # API-key entry (used by web build so each player brings their own key)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _browser_localstorage_get(key: str) -> str | None:
+        """Read a value from window.localStorage when running under pygbag.
+        Returns None on desktop or if anything fails."""
+        try:
+            import platform as plat_mod  # pygbag injects .window
+            if hasattr(plat_mod, "window"):
+                v = plat_mod.window.localStorage.getItem(key)
+                return v if v else None
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _browser_localstorage_set(key: str, value: str) -> None:
+        try:
+            import platform as plat_mod
+            if hasattr(plat_mod, "window"):
+                plat_mod.window.localStorage.setItem(key, value)
+        except Exception:
+            pass
+
+    def prompt_for_openai_key(self, default_model: str = "gpt-4o-mini") -> None:
+        """Open a startup modal asking for the user's OpenAI API key.
+
+        - If a key is already saved in browser localStorage, use it silently.
+        - If the user submits a non-empty key, attach an NPCResponder.
+        - If they submit empty (or hit ESC), fall back to deterministic NPCs.
+        """
+        # Already configured? Skip.
+        if self.env._npc_responder is not None:
+            return
+
+        saved = self._browser_localstorage_get("OPENAI_API_KEY")
+        if saved:
+            self._attach_openai_responder(saved, default_model)
+            return
+
+        def _on_submit(value: str) -> None:
+            if value:
+                self._attach_openai_responder(value, default_model)
+                self._browser_localstorage_set("OPENAI_API_KEY", value)
+                self._show_toast("ChatGPT NPCs enabled")
+            else:
+                self._show_toast("Using fallback NPCs (no key entered)")
+
+        self.modal = Modal(
+            title="Enter your OpenAI API key",
+            prompt="Paste your sk-... key for ChatGPT-powered NPC interviews. ENTER to save, ESC to skip.",
+            on_submit=_on_submit,
+            mask=True,
+        )
+
+    def _attach_openai_responder(self, api_key: str, model: str) -> None:
+        from mystery_world.npc_responder import NPCResponder
+        self.env.set_npc_responder(NPCResponder(
+            base_url=None,           # default OpenAI endpoint
+            model=model,
+            api_key=api_key,
+        ))
 
     # ------------------------------------------------------------------
     # Layout / room transitions
@@ -761,8 +831,9 @@ class MysteryGame:
         pygame.draw.rect(self.screen, HUD_BG, field)
         pygame.draw.rect(self.screen, HUD_BORDER, field, 2)
         cursor = "_" if (pygame.time.get_ticks() // 500) % 2 else " "
+        display = ("•" * len(self.modal.text)) if self.modal.mask else self.modal.text
         self.screen.blit(
-            self.font_md.render(self.modal.text + cursor, True, HUD_TEXT),
+            self.font_md.render(display + cursor, True, HUD_TEXT),
             (field.x + 8, field.y + 10),
         )
 
@@ -1004,89 +1075,104 @@ class MysteryGame:
     # Main loop
     # ------------------------------------------------------------------
 
-    def run(self) -> None:
-        while self.running:
-            dt = self.clock.tick(60) / 1000.0  # seconds since last frame
+    # ------------------------------------------------------------------
+    # One frame of game logic. Split out so both sync run() and async
+    # run_async() can drive it. Returns True while the game is still alive.
+    # ------------------------------------------------------------------
 
-            # ---- events ----
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    continue
+    def _tick(self) -> bool:
+        if not self.running:
+            return False
+        dt = self.clock.tick(60) / 1000.0
 
-                if self.modal is not None:
-                    active = self.modal
-                    if active.handle_key(event):
-                        # Only clear if on_submit didn't chain to a new modal
-                        if self.modal is active:
-                            self.modal = None
-                    continue
+        # ---- events ----
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+                continue
 
-                if event.type == pygame.KEYDOWN:
-                    # Once the episode is over, the end-screen owns input.
-                    if self._is_episode_over():
-                        if event.key == MENU_KEY:
-                            self.running = False
-                        elif event.key in (pygame.K_UP, pygame.K_PAGEUP):
-                            self._endscreen_scroll = max(0, self._endscreen_scroll - 36)
-                        elif event.key in (pygame.K_DOWN, pygame.K_PAGEDOWN):
-                            self._endscreen_scroll += 36
-                        continue
+            if self.modal is not None:
+                active = self.modal
+                if active.handle_key(event):
+                    if self.modal is active:
+                        self.modal = None
+                continue
 
-                    if self.menu_open:
-                        self._menu_action(event.key)
-                        continue
+            if event.type == pygame.KEYDOWN:
+                if self._is_episode_over():
                     if event.key == MENU_KEY:
-                        self._open_menu()
-                    elif event.key == INTERACT_KEY:
-                        self._interact_at_player()
-                    elif event.key in (pygame.K_1, pygame.K_KP1):
-                        self.active_tab = TAB_CASE
-                    elif event.key in (pygame.K_2, pygame.K_KP2):
-                        self.active_tab = TAB_INTERVIEWS
-                    elif event.key in (pygame.K_3, pygame.K_KP3):
-                        self.active_tab = TAB_EVIDENCE
+                        self.running = False
                     elif event.key in (pygame.K_UP, pygame.K_PAGEUP):
-                        self._scroll[self.active_tab] = max(0, self._scroll[self.active_tab] - 36)
+                        self._endscreen_scroll = max(0, self._endscreen_scroll - 36)
                     elif event.key in (pygame.K_DOWN, pygame.K_PAGEDOWN):
-                        self._scroll[self.active_tab] += 36
+                        self._endscreen_scroll += 36
+                    continue
 
-            # ---- continuous movement (only if no modal/menu and game live) ----
-            if (
-                self.modal is None
-                and not self.menu_open
-                and not self.env.is_solved
-                and self.env.budget_remaining > 0
-            ):
-                keys = pygame.key.get_pressed()
-                vx = vy = 0.0
-                # WASD only — arrow keys are reserved for sidebar scroll.
-                if keys[pygame.K_w]:
-                    vy -= 1
-                if keys[pygame.K_s]:
-                    vy += 1
-                if keys[pygame.K_a]:
-                    vx -= 1
-                if keys[pygame.K_d]:
-                    vx += 1
-                if vx or vy:
-                    norm = (vx * vx + vy * vy) ** 0.5
-                    vx /= norm
-                    vy /= norm
-                    self._try_move_player(vx * PLAYER_SPEED_PX * dt, vy * PLAYER_SPEED_PX * dt)
+                if self.menu_open:
+                    self._menu_action(event.key)
+                    continue
+                if event.key == MENU_KEY:
+                    self._open_menu()
+                elif event.key == INTERACT_KEY:
+                    self._interact_at_player()
+                elif event.key in (pygame.K_1, pygame.K_KP1):
+                    self.active_tab = TAB_CASE
+                elif event.key in (pygame.K_2, pygame.K_KP2):
+                    self.active_tab = TAB_INTERVIEWS
+                elif event.key in (pygame.K_3, pygame.K_KP3):
+                    self.active_tab = TAB_EVIDENCE
+                elif event.key in (pygame.K_UP, pygame.K_PAGEUP):
+                    self._scroll[self.active_tab] = max(0, self._scroll[self.active_tab] - 36)
+                elif event.key in (pygame.K_DOWN, pygame.K_PAGEDOWN):
+                    self._scroll[self.active_tab] += 36
 
-            # ---- draw ----
-            self.screen.fill(BG_COLOR)
-            self._draw_topbar()
-            self._draw_room()
-            self._draw_objects()
-            self._draw_characters()
-            self._draw_player()
-            self._draw_status_line()
-            self._draw_sidebar()
-            self._draw_menu()
-            self._draw_modal()
-            self._draw_endscreen()
-            pygame.display.flip()
+        # ---- continuous movement (only if no modal/menu and game live) ----
+        if (
+            self.modal is None
+            and not self.menu_open
+            and not self.env.is_solved
+            and self.env.budget_remaining > 0
+        ):
+            keys = pygame.key.get_pressed()
+            vx = vy = 0.0
+            if keys[pygame.K_w]:
+                vy -= 1
+            if keys[pygame.K_s]:
+                vy += 1
+            if keys[pygame.K_a]:
+                vx -= 1
+            if keys[pygame.K_d]:
+                vx += 1
+            if vx or vy:
+                norm = (vx * vx + vy * vy) ** 0.5
+                vx /= norm
+                vy /= norm
+                self._try_move_player(vx * PLAYER_SPEED_PX * dt, vy * PLAYER_SPEED_PX * dt)
 
+        # ---- draw ----
+        self.screen.fill(BG_COLOR)
+        self._draw_topbar()
+        self._draw_room()
+        self._draw_objects()
+        self._draw_characters()
+        self._draw_player()
+        self._draw_status_line()
+        self._draw_sidebar()
+        self._draw_menu()
+        self._draw_modal()
+        self._draw_endscreen()
+        pygame.display.flip()
+        return True
+
+    def run(self) -> None:
+        while self._tick():
+            pass
+        pygame.quit()
+
+    async def run_async(self) -> None:
+        """Async loop for pygbag/Pyodide: yields to the browser event loop
+        each frame so the page stays responsive."""
+        import asyncio
+        while self._tick():
+            await asyncio.sleep(0)
         pygame.quit()

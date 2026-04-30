@@ -188,13 +188,24 @@ class NPCResponder:
 
     def __init__(
         self,
-        base_url: str = _DEFAULT_NPC_URL,
+        base_url: str | None = _DEFAULT_NPC_URL,
         model: str = _DEFAULT_NPC_MODEL,
         seed: int = _FIXED_SEED,
+        api_key: str | None = None,
     ) -> None:
+        """
+        api_key:
+          - If you point at OpenAI / Together / any hosted provider, pass the
+            key explicitly or set OPENAI_API_KEY in your environment.
+          - For a local vLLM endpoint, leave it as None — we fall back to
+            the dummy "EMPTY" placeholder so the openai SDK doesn't object.
+          - If base_url is None, we use OpenAI's default endpoint, which
+            requires a real key.
+        """
         self.base_url = base_url
         self.model = model
         self.seed = seed
+        self.api_key = api_key
         self._client: Any = None
 
     def _ensure_client(self) -> None:
@@ -202,9 +213,16 @@ class NPCResponder:
             return
         try:
             import openai
-            self._client = openai.OpenAI(base_url=self.base_url, api_key="EMPTY")
         except ImportError as exc:
             raise RuntimeError("openai package required: pip install openai") from exc
+        import os
+        # Resolve API key: explicit > env var > "EMPTY" placeholder for local servers
+        key = self.api_key or os.environ.get("OPENAI_API_KEY") or "EMPTY"
+        if self.base_url is None:
+            # Default OpenAI endpoint
+            self._client = openai.OpenAI(api_key=key)
+        else:
+            self._client = openai.OpenAI(base_url=self.base_url, api_key=key)
 
     def respond(
         self,

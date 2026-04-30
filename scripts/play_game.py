@@ -68,24 +68,58 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=None, help="Random seed (random if omitted)")
     parser.add_argument(
-        "--npc-url", default=None,
-        help="OpenAI-compatible base URL for LLM-powered NPC interviews",
+        "--npc-provider",
+        choices=["chatgpt", "vllm", "off"],
+        default="off",
+        help="NPC backend: 'chatgpt' uses OpenAI (needs OPENAI_API_KEY), "
+             "'vllm' uses --npc-url, 'off' uses deterministic fallback",
     )
-    parser.add_argument("--npc-model", default="Qwen/Qwen3.5-27B")
+    parser.add_argument(
+        "--npc-url", default=None,
+        help="OpenAI-compatible base URL (only with --npc-provider vllm)",
+    )
+    parser.add_argument(
+        "--npc-model",
+        default=None,
+        help="Model name. Defaults: gpt-4o-mini for chatgpt, Qwen/Qwen3.5-27B for vllm",
+    )
+    parser.add_argument(
+        "--npc-api-key",
+        default=None,
+        help="Explicit API key. Defaults to OPENAI_API_KEY env var.",
+    )
     parser.add_argument("--npc-seed", type=int, default=42)
     args = parser.parse_args()
 
     world = _load_world(args)
     env = MysteryEnvironment(world)
 
-    if args.npc_url:
-        from mystery_world.npc_responder import NPCResponder
-        env.set_npc_responder(NPCResponder(
-            base_url=args.npc_url, model=args.npc_model, seed=args.npc_seed
-        ))
-        print(f"NPC interviews: {args.npc_model} @ {args.npc_url}")
+    from mystery_world.npc_responder import NPCResponder
+    if args.npc_provider == "chatgpt":
+        model = args.npc_model or "gpt-4o-mini"
+        responder = NPCResponder(
+            base_url=None,         # default OpenAI endpoint
+            model=model,
+            seed=args.npc_seed,
+            api_key=args.npc_api_key,
+        )
+        env.set_npc_responder(responder)
+        print(f"NPC interviews: ChatGPT ({model}) via OpenAI API")
+    elif args.npc_provider == "vllm":
+        if not args.npc_url:
+            print("--npc-provider vllm requires --npc-url")
+            sys.exit(1)
+        model = args.npc_model or "Qwen/Qwen3.5-27B"
+        responder = NPCResponder(
+            base_url=args.npc_url,
+            model=model,
+            seed=args.npc_seed,
+            api_key=args.npc_api_key,
+        )
+        env.set_npc_responder(responder)
+        print(f"NPC interviews: {model} @ {args.npc_url}")
     else:
-        print("NPC interviews: deterministic fallback (pass --npc-url to use an LLM)")
+        print("NPC interviews: deterministic fallback (pass --npc-provider chatgpt for ChatGPT)")
 
     MysteryGame(env, window_title=f"MysteryArena — seed {world.seed}").run()
 
