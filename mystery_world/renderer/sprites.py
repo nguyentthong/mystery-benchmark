@@ -109,10 +109,9 @@ class ProceduralSprites(SpriteLoader):
         discovered: bool,
         evidence_state: EvidenceState | None,
     ) -> None:
-        if evidence_state in (EvidenceState.HIDDEN, EvidenceState.DESTROYED):
-            return
-        # Pick the pictograph that matches the object's name. No status
-        # badges — the player figures out what's interactable by examining.
+        # The object remains in the room even if its associated evidence is
+        # HIDDEN or DESTROYED — only the *clue* on it has gone, not the prop
+        # itself. So we always draw the icon.
         draw_fn = self._pick_object_icon(obj.name)
         draw_fn(surface, rect)
 
@@ -122,13 +121,15 @@ class ProceduralSprites(SpriteLoader):
     def _pick_object_icon(cls, name: str):
         """Match the object's name against a small library; fall back to
         a generic prop. Uses word-boundary matching so e.g. "urn" doesn't
-        match inside "b-urn-ed" or "overt-urn-ed"."""
+        match inside "b-urn-ed" or "overt-urn-ed". The library stores method
+        names as strings so we can reference methods defined later in the
+        class body."""
         import re
         n = (name or "").lower()
-        for keys, fn in cls._ICON_LIBRARY:
+        for keys, fn_name in cls._ICON_LIBRARY:
             for k in keys:
                 if re.search(rf"\b{re.escape(k)}\b", n):
-                    return fn
+                    return getattr(cls, fn_name)
         return cls._draw_chair
 
     # ---- pictograph primitives ---------------------------------------
@@ -535,6 +536,45 @@ class ProceduralSprites(SpriteLoader):
         pygame.draw.rect(surface, (40, 25, 10), (cx - 5, body.y - 2, 10, 6), 1)
 
     @staticmethod
+    def _draw_rope(surface, rect):
+        """Coiled rope / silk scarf — wavy nested loops."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.6)
+        # Three nested ovals to suggest a coil
+        for i, scale in enumerate((1.0, 0.7, 0.4)):
+            w = int(s * scale)
+            h = int(s * scale * 0.55)
+            ring = pygame.Rect(cx - w // 2, cy - h // 2, w, h)
+            color = (200, 160, 100) if i % 2 == 0 else (160, 120, 70)
+            pygame.draw.ellipse(surface, color, ring, 3)
+        # Tail strand falling off
+        pygame.draw.line(surface, (200, 160, 100),
+                         (cx + s // 2, cy + 4),
+                         (cx + s // 2 + 6, cy + s // 4), 3)
+
+    @staticmethod
+    def _draw_figurine(surface, rect):
+        """Decorative statuette / marble bookend — tall pedestal with bust."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.55)
+        # Pedestal base
+        base = pygame.Rect(cx - s // 3, cy + s // 6, 2 * s // 3, s // 6)
+        pygame.draw.rect(surface, (220, 220, 215), base)
+        pygame.draw.rect(surface, (60, 60, 70), base, 2)
+        # Column
+        col = pygame.Rect(cx - s // 5, cy - s // 6, 2 * s // 5, s // 3)
+        pygame.draw.rect(surface, (210, 210, 205), col)
+        pygame.draw.rect(surface, (60, 60, 70), col, 2)
+        # Bust (head + shoulders silhouette)
+        # Shoulders
+        sh = pygame.Rect(cx - s // 4, cy - s // 4, s // 2, s // 6)
+        pygame.draw.ellipse(surface, (200, 200, 200), sh)
+        pygame.draw.ellipse(surface, (60, 60, 70), sh, 2)
+        # Head
+        pygame.draw.circle(surface, (200, 200, 200), (cx, cy - s // 3), s // 8)
+        pygame.draw.circle(surface, (60, 60, 70), (cx, cy - s // 3), s // 8, 2)
+
+    @staticmethod
     def _draw_window(surface, rect):
         """Window frame with cross-mullions."""
         cx, cy = rect.center
@@ -572,36 +612,49 @@ class ProceduralSprites(SpriteLoader):
         pygame.draw.circle(surface, (220, 200, 80), (head_x, head_y + 2), max(2, s // 14))
 
     # Library: keys to look for (lowercased) -> draw callback.
-    # Long, specific keys first so e.g. "fireplace mantel" matches fireplace
-    # before generic words like "mantel" or "table".
+    # ORDER MATTERS — earlier entries win. Blade weapons MUST come before
+    # ("letter") and ("fireplace") so e.g. "ornate letter opener" hits the
+    # blade icon, not the envelope, and "iron fireplace poker" hits the
+    # blade icon, not the fireplace.
     _ICON_LIBRARY = [
-        (("fireplace", "hearth"),          _draw_fireplace),
-        (("radiator",),                    _draw_radiator),
-        (("chess",),                       _draw_chess),
-        (("basket",),                      _draw_basket),
-        (("glass", "tumbler", "goblet"),   _draw_glass),
-        (("safe", "vault"),                _draw_safe),
-        (("boots", "shoes"),               _draw_boots),
-        (("glove",),                       _draw_glove),
-        (("bouquet", "flowers", "rose"),   _draw_flower),
-        (("mirror",),                      _draw_mirror),
-        (("clock", "watch", "timepiece"),  _draw_clock),
-        (("candle", "candelabra", "lamp", "lantern"), _draw_candle),
-        (("book", "diary", "journal", "ledger", "tome", "shelf"), _draw_book),
-        (("spectacles", "eyeglasses", "monocle"), _draw_spectacles),
-        (("vase", "pot"),                  _draw_vase),
-        (("key",),                         _draw_key),
-        (("letter", "note", "envelope", "telegram", "memo",
-          "receipt", "ticket"),            _draw_letter),
-        (("umbrella", "parasol"),          _draw_umbrella),
-        (("bottle", "decanter", "flask", "vial"), _draw_bottle),
-        (("pistol", "revolver", "rifle", "shotgun", "firearm"), _draw_gun),
-        (("rug", "carpet", "tapestry", "curtain"), _draw_rug),
-        (("painting", "portrait", "canvas", "frame"), _draw_painting),
-        (("desk", "table"),                _draw_table),
-        (("trunk", "chest"),               _draw_trunk),
-        (("window", "ledge"),              _draw_window),
-        (("rack", "stand"),                _draw_coat_rack),
+        # --- weapons (blade) — must be near the top ---
+        (("cleaver", "knife", "dagger", "blade", "sword",
+          "poker", "opener", "shears", "scissors"),     "_draw_weapon"),
+        (("pistol", "revolver", "rifle", "shotgun",
+          "firearm", "gun"),                            "_draw_gun"),
+        # --- weapons (blunt / fabric) ---
+        (("rope", "cord", "scarf"),                     "_draw_rope"),
+        (("statuette", "statue", "figurine", "bust",
+          "bookend"),                                   "_draw_figurine"),
+        # --- room props with specific icons ---
+        (("fireplace", "hearth"),                       "_draw_fireplace"),
+        (("radiator",),                                 "_draw_radiator"),
+        (("chess",),                                    "_draw_chess"),
+        (("basket",),                                   "_draw_basket"),
+        (("glass", "tumbler", "goblet"),                "_draw_glass"),
+        (("safe", "vault"),                             "_draw_safe"),
+        (("boots", "shoes"),                            "_draw_boots"),
+        (("glove",),                                    "_draw_glove"),
+        (("bouquet", "flowers"),                        "_draw_flower"),
+        (("mirror",),                                   "_draw_mirror"),
+        (("clock", "watch", "timepiece"),               "_draw_clock"),
+        (("candle", "candelabra", "candlestick",
+          "lamp", "lantern"),                           "_draw_candle"),
+        (("book", "diary", "journal", "ledger",
+          "tome", "shelf"),                             "_draw_book"),
+        (("spectacles", "eyeglasses", "monocle"),       "_draw_spectacles"),
+        (("vase", "pot"),                               "_draw_vase"),
+        (("key",),                                      "_draw_key"),
+        (("letter", "note", "envelope", "telegram",
+          "memo", "receipt", "ticket"),                 "_draw_letter"),
+        (("umbrella", "parasol"),                       "_draw_umbrella"),
+        (("bottle", "decanter", "flask", "vial"),       "_draw_bottle"),
+        (("rug", "carpet", "tapestry", "curtain"),      "_draw_rug"),
+        (("painting", "portrait", "canvas", "frame"),   "_draw_painting"),
+        (("desk", "table"),                             "_draw_table"),
+        (("trunk", "chest"),                            "_draw_trunk"),
+        (("window", "ledge"),                           "_draw_window"),
+        (("rack", "stand"),                             "_draw_coat_rack"),
     ]
 
     # ---- status badges -----------------------------------------------
