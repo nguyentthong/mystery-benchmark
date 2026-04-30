@@ -419,7 +419,7 @@ class MysteryGame:
         def ask_suspect(value: str) -> None:
             captured["suspect_name"] = value
             self.modal = Modal(
-                title="Accusation 2/3 — weapon",
+                title="Accusation 2/3 - weapon",
                 prompt="Name the murder weapon (ENTER).",
                 on_submit=ask_weapon,
             )
@@ -427,7 +427,7 @@ class MysteryGame:
         def ask_weapon(value: str) -> None:
             captured["weapon_name"] = value
             self.modal = Modal(
-                title="Accusation 3/3 — location",
+                title="Accusation 3/3 - location",
                 prompt="Name the room where the murder happened (ENTER).",
                 on_submit=ask_location,
             )
@@ -437,7 +437,7 @@ class MysteryGame:
             self._do_action(AgentAction.ACCUSE, **captured)
 
         self.modal = Modal(
-            title="Accusation 1/3 — suspect",
+            title="Accusation 1/3 - suspect",
             prompt="Name the culprit (ENTER).",
             on_submit=ask_suspect,
         )
@@ -726,7 +726,7 @@ class MysteryGame:
         for s in sorted(suspects, key=lambda c: c.full_name):
             seen = self.last_seen.get(s.id, "?")
             interviewed = s.id in self.env._interviewed_characters
-            mark = "[x]" if interviewed else "[ ]"
+            mark = "[OK]" if interviewed else "[--]"
             _h(f"  {mark} {s.full_name}")
             _b(f"      last seen: {seen}")
             if s.motive:
@@ -744,7 +744,7 @@ class MysteryGame:
         for s in sorted(innocents, key=lambda c: c.full_name):
             seen = self.last_seen.get(s.id, "?")
             interviewed = s.id in self.env._interviewed_characters
-            mark = "[x]" if interviewed else "[ ]"
+            mark = "[OK]" if interviewed else "[--]"
             _b(f"  {mark} {s.full_name}  ({seen})")
         lines.append(("", HUD_DIM))
 
@@ -786,7 +786,7 @@ class MysteryGame:
 
         lines: list[tuple[str, tuple[int, int, int]]] = []
         if not histories:
-            lines.append(("(No interviews yet — talk to an NPC with E.)", HUD_DIM))
+            lines.append(("(No interviews yet - talk to an NPC with E.)", HUD_DIM))
         else:
             for cid, hist in histories.items():
                 char = self.state.characters.get(cid)
@@ -813,14 +813,14 @@ class MysteryGame:
         lines: list[tuple[str, tuple[int, int, int]]] = []
 
         if not self.env._discovered_evidence:
-            lines.append(("(No evidence collected yet — examine objects with E.)", HUD_DIM))
+            lines.append(("(No evidence collected yet - examine objects with E.)", HUD_DIM))
         else:
             for eid in self.env._discovered_evidence:
                 ev = self.state.evidence.get(eid)
                 if not ev:
                     continue
                 lines.append((f"[{ev.id}]  {ev.name}", HUD_TEXT))
-                edge = ev.relevance.edge_type.name if ev.relevance else "—"
+                edge = ev.relevance.edge_type.name if ev.relevance else "-"
                 loc = self.state.locations.get(ev.location_id)
                 loc_name = loc.name if loc else "?"
                 lines.append((f"  {ev.evidence_type.name.lower()} | {edge} | {loc_name}", HUD_DIM))
@@ -954,7 +954,7 @@ class MysteryGame:
         if culprit and culprit.motive:
             body(f"{culprit_name} was driven by {culprit.motive}.")
         else:
-            body(f"The motive remains murky — but the evidence places {culprit_name} at the scene.")
+            body(f"The motive remains murky -- but the evidence places {culprit_name} at the scene.")
 
         # ── How they tried to lie ──
         hdr("HOW THEY TRIED TO COVER IT UP")
@@ -969,12 +969,12 @@ class MysteryGame:
                 corr_name = corr.full_name if corr else "someone"
                 if culprit.alibi_corroboration_is_genuine:
                     body(
-                        f"{corr_name} backed up the story — but {corr_name}'s "
+                        f"{corr_name} backed up the story -- but {corr_name}'s "
                         "account didn't square with what the physical evidence revealed."
                     )
                 else:
                     body(
-                        f"{corr_name} backed up the story — but {corr_name} was "
+                        f"{corr_name} backed up the story -- but {corr_name} was "
                         f"lying for them. A house of cards."
                     )
             else:
@@ -984,7 +984,7 @@ class MysteryGame:
                 f"placed {culprit_name} firmly in the {room_name} when {victim_name} died."
             )
         else:
-            body(f"{culprit_name} offered no alibi — and the evidence wasn't kind.")
+            body(f"{culprit_name} offered no alibi -- and the evidence wasn't kind.")
 
         # ── The trail of evidence ──
         hdr("THE TRAIL OF EVIDENCE")
@@ -1008,7 +1008,7 @@ class MysteryGame:
             push(label, HUD_TEXT)
             for ev in valid:
                 loc = state.locations.get(ev.location_id)
-                where = f" — found in the {loc.name}" if loc else ""
+                where = f" -- found in the {loc.name}" if loc else ""
                 check = " (you found this!)" if ev.id in env._discovered_evidence else " (you missed this)"
                 bullet(f"{ev.description}{where}.{check}",
                        color=(GREEN if ev.id in env._discovered_evidence else HUD_DIM))
