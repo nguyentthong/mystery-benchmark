@@ -1022,9 +1022,9 @@ class EmojiSprites(SpriteLoader):
             self._blit_glyph(surface, rect, self._GLYPH_DOOR, scale=0.7)
 
     def draw_object(self, surface, rect, obj, discovered, evidence_state):
-        if evidence_state in (EvidenceState.HIDDEN, EvidenceState.DESTROYED):
-            return
-        # Choose the right glyph
+        # Always draw the prop — evidence state (HIDDEN / DESTROYED) only
+        # affects what examining the object yields, not whether the prop
+        # itself is visible.
         if obj.is_weapon:
             glyph = self._GLYPH_WEAPON
         elif obj.evidence_id and discovered:
@@ -1106,8 +1106,8 @@ class KenneySprites(SpriteLoader):
         self._blit_or_fallback("door", surface, rect, lambda: self._procedural.draw_door(surface, rect))
 
     def draw_object(self, surface, rect, obj, discovered, evidence_state):
-        if evidence_state in (EvidenceState.HIDDEN, EvidenceState.DESTROYED):
-            return
+        # Always draw the prop — evidence state only affects what examining
+        # yields, not whether the prop itself is visible.
         if obj.is_weapon:
             name = "weapon"
         elif obj.evidence_id and discovered:
