@@ -129,6 +129,20 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+@app.exception_handler(Exception)
+async def _log_unhandled(request: Request, exc: Exception) -> HTMLResponse:
+    """Print full tracebacks to stdout so HF's container-log tab shows them."""
+    import traceback as _tb
+    tb_text = _tb.format_exc()
+    print(f"[error] {request.url.path} raised {type(exc).__name__}: {exc}", flush=True)
+    print(tb_text, flush=True)
+    return HTMLResponse(
+        f"<pre style='font:14px monospace;padding:1rem;color:#f44'>"
+        f"500 internal error on {request.url.path}\n\n{tb_text}</pre>",
+        status_code=500,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -279,4 +293,11 @@ async def healthz() -> dict[str, Any]:
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 7860))   # HF Spaces convention
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    # Explicit startup logging so HF's container-log panel shows *something*
+    # even if uvicorn's own logs are buffered weirdly.
+    print(f"[startup] MysteryArena server booting on 0.0.0.0:{port}", flush=True)
+    print(f"[startup] templates dir: {TEMPLATES_DIR}  exists={TEMPLATES_DIR.exists()}", flush=True)
+    print(f"[startup] static dir:    {STATIC_DIR}  exists={STATIC_DIR.exists()}", flush=True)
+    print(f"[startup] python={sys.version.split()[0]}, "
+          f"pygame_video_driver={os.environ.get('SDL_VIDEODRIVER')}", flush=True)
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
