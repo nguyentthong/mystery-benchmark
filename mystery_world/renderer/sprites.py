@@ -12,6 +12,7 @@ Two implementations:
 """
 from __future__ import annotations
 
+import hashlib
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -179,6 +180,154 @@ class ProceduralSprites(SpriteLoader):
         # Forward triangle so orientation/identity is unambiguous
         pts = [(cx, cy - radius - 4), (cx - 5, cy - radius + 2), (cx + 5, cy - radius + 2)]
         pygame.draw.polygon(surface, PLAYER_OUTLINE, pts)
+
+
+# ---------------------------------------------------------------------------
+# Emoji sprite loader (default — uses Noto Color Emoji for real-world icons)
+# ---------------------------------------------------------------------------
+
+# Common Linux paths for Noto Color Emoji. None of macOS / Windows have it
+# at a predictable path; on those, the loader auto-falls-back to procedural.
+_EMOJI_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+    "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+    "/usr/share/fonts/google-noto/NotoColorEmoji.ttf",
+    "/usr/share/fonts/truetype/noto-color-emoji/NotoColorEmoji.ttf",
+]
+
+# Pool of "person" emoji to give NPCs visual variety. Single-codepoint glyphs
+# only — Noto Color Emoji renders these reliably.
+_NPC_EMOJI_POOL = ["👨", "👩", "🧓", "👴", "👵", "🧔", "👨‍🦰", "👩‍🦰", "👨‍🦱", "👩‍🦱"]
+
+
+def _find_emoji_font() -> str | None:
+    for p in _EMOJI_FONT_CANDIDATES:
+        if Path(p).exists():
+            return p
+    return None
+
+
+class EmojiSprites(SpriteLoader):
+    """Real Unicode emoji rendered through Noto Color Emoji.
+
+    Tiles (floor/wall/door) stay coloured for legibility. Entities (player,
+    NPCs, victim, weapon, evidence, props) are rendered as emoji glyphs scaled
+    to the tile size. If the emoji font isn't found, the loader transparently
+    falls back to `ProceduralSprites`.
+    """
+
+    # Native render size of bitmap colour emoji fonts. We render once at this
+    # size per glyph and cache; downscaling to tile size is one smoothscale.
+    _NATIVE_SIZE = 109
+
+    # Glyph map per category. NPC variants are picked per character below.
+    _GLYPH_PLAYER = "🕵️"
+    _GLYPH_VICTIM = "💀"
+    _GLYPH_WEAPON = "⚔️"
+    _GLYPH_EVIDENCE_DISCOVERED = "🔍"
+    _GLYPH_EVIDENCE_HIDDEN = "📦"
+    _GLYPH_OBJECT_PROP = "🪑"
+    _GLYPH_DOOR = "🚪"
+
+    def __init__(self) -> None:
+        self._procedural = ProceduralSprites()
+        self._font_path = _find_emoji_font()
+        self._font: pygame.font.Font | None = None
+        self._cache: dict[tuple[str, int], pygame.Surface | None] = {}
+        if self._font_path:
+            try:
+                self._font = pygame.font.Font(self._font_path, self._NATIVE_SIZE)
+            except Exception:
+                self._font = None
+
+    @property
+    def available(self) -> bool:
+        return self._font is not None
+
+    # --- glyph rendering -------------------------------------------------
+
+    def _glyph(self, text: str, target_px: int) -> pygame.Surface | None:
+        if self._font is None:
+            return None
+        key = (text, target_px)
+        if key in self._cache:
+            return self._cache[key]
+        try:
+            native = self._font.render(text, True, (255, 255, 255))
+            # scale longest side to target_px, preserving aspect ratio
+            w, h = native.get_size()
+            scale = target_px / max(w, h)
+            new = pygame.transform.smoothscale(
+                native, (max(1, int(w * scale)), max(1, int(h * scale)))
+            )
+            self._cache[key] = new
+            return new
+        except Exception:
+            self._cache[key] = None
+            return None
+
+    def _blit_glyph(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        glyph: str,
+        scale: float = 0.85,
+    ) -> bool:
+        target = int(min(rect.w, rect.h) * scale)
+        s = self._glyph(glyph, target)
+        if s is None:
+            return False
+        r = s.get_rect(center=rect.center)
+        surface.blit(s, r)
+        return True
+
+    @staticmethod
+    def _npc_emoji_for(char: Character) -> str:
+        h = int(hashlib.sha1(char.id.encode()).hexdigest(), 16)
+        return _NPC_EMOJI_POOL[h % len(_NPC_EMOJI_POOL)]
+
+    # --- SpriteLoader API -----------------------------------------------
+
+    def draw_floor(self, surface, rect):
+        # No emoji for floor — clean tile keeps the room readable
+        self._procedural.draw_floor(surface, rect)
+
+    def draw_wall(self, surface, rect):
+        self._procedural.draw_wall(surface, rect)
+
+    def draw_door(self, surface, rect):
+        self._procedural.draw_door(surface, rect)
+        if self._font is not None:
+            self._blit_glyph(surface, rect, self._GLYPH_DOOR, scale=0.7)
+
+    def draw_object(self, surface, rect, obj, discovered, evidence_state):
+        if evidence_state in (EvidenceState.HIDDEN, EvidenceState.DESTROYED):
+            return
+        # Choose the right glyph
+        if obj.is_weapon:
+            glyph = self._GLYPH_WEAPON
+        elif obj.evidence_id and discovered:
+            glyph = self._GLYPH_EVIDENCE_DISCOVERED
+        elif obj.evidence_id:
+            glyph = self._GLYPH_EVIDENCE_HIDDEN
+        else:
+            glyph = self._GLYPH_OBJECT_PROP
+        if not self._blit_glyph(surface, rect, glyph, scale=0.85):
+            self._procedural.draw_object(surface, rect, obj, discovered, evidence_state)
+
+    def draw_character(self, surface, rect, char):
+        if not char.is_alive:
+            if not self._blit_glyph(surface, rect, self._GLYPH_VICTIM, scale=0.9):
+                self._procedural.draw_character(surface, rect, char)
+            return
+        glyph = self._npc_emoji_for(char)
+        if not self._blit_glyph(surface, rect, glyph, scale=0.9):
+            self._procedural.draw_character(surface, rect, char)
+
+    def draw_player(self, surface, cx, cy, radius):
+        rect = pygame.Rect(cx - radius * 2, cy - radius * 2, radius * 4, radius * 4)
+        if not self._blit_glyph(surface, rect, self._GLYPH_PLAYER, scale=0.9):
+            self._procedural.draw_player(surface, cx, cy, radius)
 
 
 # ---------------------------------------------------------------------------

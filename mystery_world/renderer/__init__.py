@@ -11,7 +11,12 @@ from mystery_world.renderer.observation import (
     render_observation_pil,
     render_observation_png,
 )
-from mystery_world.renderer.sprites import KenneySprites, ProceduralSprites, SpriteLoader
+from mystery_world.renderer.sprites import (
+    EmojiSprites,
+    KenneySprites,
+    ProceduralSprites,
+    SpriteLoader,
+)
 
 __all__ = [
     "RoomLayout",
@@ -22,6 +27,7 @@ __all__ = [
     "render_observation_pil",
     "SpriteLoader",
     "ProceduralSprites",
+    "EmojiSprites",
     "KenneySprites",
 ]
 

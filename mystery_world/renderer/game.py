@@ -33,7 +33,7 @@ import pygame
 from mystery_world.entities import Character, EvidenceState, Location, WorldObject
 from mystery_world.narrator import render_initial_briefing, render_step_observation
 from mystery_world.renderer.layout import RoomLayout, Tile, build_room_layout
-from mystery_world.renderer.sprites import ProceduralSprites, SpriteLoader
+from mystery_world.renderer.sprites import EmojiSprites, ProceduralSprites, SpriteLoader
 from mystery_world.world import AgentAction, MysteryEnvironment
 
 # ---------------------------------------------------------------------------
@@ -41,11 +41,19 @@ from mystery_world.world import AgentAction, MysteryEnvironment
 # ---------------------------------------------------------------------------
 
 TILE_PX = 44
-HUD_H = 220             # bottom HUD strip
-SIDEBAR_W = 280         # right sidebar (location info, hint, menu state)
+TOPBAR_H = 36           # top status bar
+STATUS_H = 64           # bottom 2-line status (last action result)
+SIDEBAR_W = 380         # right notebook (Case File / Interviews / Evidence)
+TAB_BAR_H = 32          # tab strip at top of sidebar
 PLAYER_SPEED_PX = 220   # pixels per second
 INTERACT_KEY = pygame.K_e
 MENU_KEY = pygame.K_ESCAPE
+
+# Tab IDs
+TAB_CASE = 0
+TAB_INTERVIEWS = 1
+TAB_EVIDENCE = 2
+TAB_NAMES = ["[1] Case File", "[2] Interviews", "[3] Evidence"]
 
 BG_COLOR = (18, 16, 22)
 PLAYER_COLOR = (255, 240, 220)
@@ -102,9 +110,15 @@ class MysteryGame:
         self.env = env
         self.state = env.state
         self.window_title = window_title
-        self.sprites: SpriteLoader = sprites or ProceduralSprites()
 
-        # Cache one layout per location id (built lazily)
+        # Pygame must be initialised before EmojiSprites loads its font
+        pygame.init()
+        pygame.display.set_caption(window_title)
+
+        # Default sprite loader: emoji icons (real icons, not geometric shapes).
+        # Falls back to procedural primitives if Noto Color Emoji isn't found.
+        self.sprites: SpriteLoader = sprites or EmojiSprites()
+
         self._layouts: dict[str, RoomLayout] = {}
         self.current_layout: RoomLayout = self._layout_for(env.agent_location_id)
 
@@ -115,26 +129,40 @@ class MysteryGame:
 
         # HUD state
         self.briefing: str = render_initial_briefing(env)
-        self.last_observation: str = self.briefing
-        self.toast: str = "WASD to move · E to interact · ESC for menu"
+        self.last_observation: str = "Click WASD to walk · E to interact · ESC for menu · 1/2/3 to switch tabs"
+        self.toast: str = ""
         self.toast_until_ms: int = 0
+
+        # Persistent UI state — tab + per-tab scroll offset
+        self.active_tab: int = TAB_CASE
+        self._scroll: dict[int, int] = {TAB_CASE: 0, TAB_INTERVIEWS: 0, TAB_EVIDENCE: 0}
+
+        # Track last-seen room per character for the Case File tab
+        self.last_seen: dict[str, str] = {}
+        self._update_last_seen()
 
         self.modal: Modal | None = None
         self.menu_open: bool = False
         self.running: bool = True
 
-        # Pygame setup
-        pygame.init()
-        pygame.display.set_caption(window_title)
+        # Window sizing — room view + slim top bar + slim bottom status + sidebar
         room_w_px = self.current_layout.width * TILE_PX
         room_h_px = self.current_layout.height * TILE_PX
         self.win_w = room_w_px + SIDEBAR_W
-        self.win_h = room_h_px + HUD_H
+        self.win_h = TOPBAR_H + room_h_px + STATUS_H
         self.screen = pygame.display.set_mode((self.win_w, self.win_h))
         self.clock = pygame.time.Clock()
-        self.font_sm = pygame.font.SysFont("dejavusansmono,monospace", 14)
-        self.font_md = pygame.font.SysFont("dejavusansmono,monospace", 16)
-        self.font_lg = pygame.font.SysFont("dejavusansmono,monospace", 20, bold=True)
+        self.font_sm = pygame.font.SysFont("dejavusansmono,monospace", 13)
+        self.font_md = pygame.font.SysFont("dejavusansmono,monospace", 15)
+        self.font_lg = pygame.font.SysFont("dejavusansmono,monospace", 18, bold=True)
+        self.font_xl = pygame.font.SysFont("dejavusansmono,monospace", 22, bold=True)
+
+    def _update_last_seen(self) -> None:
+        """Record where each character is right now (called each step)."""
+        for cid, char in self.state.characters.items():
+            loc = self.state.locations.get(char.location_id)
+            if loc:
+                self.last_seen[cid] = loc.name
 
     # ------------------------------------------------------------------
     # Layout / room transitions
@@ -211,6 +239,7 @@ class MysteryGame:
             self._show_toast(result.observation)
         # World may have ticked → refresh dynamic content for the now-current room
         self.current_layout = self._layout_for(self.env.agent_location_id)
+        self._update_last_seen()
 
     def _trigger_move(self, target_loc_id: str) -> None:
         from_loc_id = self.env.agent_location_id
@@ -357,14 +386,24 @@ class MysteryGame:
             self._trigger_move(adj)
 
     # ------------------------------------------------------------------
-    # Drawing
+    # Drawing — coordinates
+    #
+    # Window layout:
+    #   y = 0        ── top status bar (TOPBAR_H)
+    #   y = TOPBAR_H ── room view (height = room rows × TILE_PX)
+    #                   right of room: tabbed notebook (SIDEBAR_W wide)
+    #   y = ...      ── bottom status line (STATUS_H)
     # ------------------------------------------------------------------
 
+    def _room_origin(self) -> tuple[int, int]:
+        return (0, TOPBAR_H)
+
     def _draw_room(self) -> None:
+        ox, oy = self._room_origin()
         layout = self.current_layout
         for x in range(layout.width):
             for y in range(layout.height):
-                rect = pygame.Rect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX)
+                rect = pygame.Rect(ox + x * TILE_PX, oy + y * TILE_PX, TILE_PX, TILE_PX)
                 tile = layout.tiles[x][y]
                 if tile == Tile.WALL:
                     self.sprites.draw_wall(self.screen, rect)
@@ -374,6 +413,7 @@ class MysteryGame:
                     self.sprites.draw_floor(self.screen, rect)
 
     def _draw_objects(self) -> None:
+        ox, oy = self._room_origin()
         for oid, (x, y) in self.current_layout.objects.items():
             obj = self.state.objects.get(oid)
             if obj is None:
@@ -385,100 +425,279 @@ class MysteryGame:
                 if ev:
                     ev_state = ev.state
                     discovered = ev.id in self.env._discovered_evidence
-            rect = pygame.Rect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX)
+            rect = pygame.Rect(ox + x * TILE_PX, oy + y * TILE_PX, TILE_PX, TILE_PX)
             self.sprites.draw_object(self.screen, rect, obj, discovered, ev_state)
-            cx = rect.centerx
-            cy = rect.bottom - 2
-            self._draw_label(obj.name, cx, cy)
 
     def _draw_characters(self) -> None:
+        ox, oy = self._room_origin()
         for cid, (x, y) in self.current_layout.characters.items():
             char = self.state.characters.get(cid)
             if char is None:
                 continue
-            rect = pygame.Rect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX)
+            rect = pygame.Rect(ox + x * TILE_PX, oy + y * TILE_PX, TILE_PX, TILE_PX)
             self.sprites.draw_character(self.screen, rect, char)
-            self._draw_label(char.full_name, rect.centerx, rect.bottom - 2)
 
     def _draw_player(self) -> None:
-        cx = int(self.player_px)
-        cy = int(self.player_py)
+        ox, oy = self._room_origin()
+        cx = int(ox + self.player_px)
+        cy = int(oy + self.player_py)
         self.sprites.draw_player(self.screen, cx, cy, TILE_PX // 3)
 
-    def _draw_label(self, text: str, cx: int, by: int) -> None:
-        surf = self.font_sm.render(text, True, HUD_TEXT)
-        rect = surf.get_rect(midtop=(cx, by + 4))
-        bg = rect.inflate(6, 2)
-        pygame.draw.rect(self.screen, HUD_BG, bg)
-        self.screen.blit(surf, rect)
-
-    def _draw_hud(self) -> None:
-        room_h_px = self.current_layout.height * TILE_PX
-        room_w_px = self.current_layout.width * TILE_PX
-        # Bottom HUD: last observation
-        hud_rect = pygame.Rect(0, room_h_px, self.win_w, HUD_H)
-        pygame.draw.rect(self.screen, HUD_BG, hud_rect)
-        pygame.draw.rect(self.screen, HUD_BORDER, hud_rect, 2)
-
+    def _draw_topbar(self) -> None:
+        bar = pygame.Rect(0, 0, self.win_w, TOPBAR_H)
+        pygame.draw.rect(self.screen, HUD_BG, bar)
+        pygame.draw.rect(self.screen, HUD_BORDER, bar, 1)
         loc = self.state.locations.get(self.env.agent_location_id)
         loc_name = loc.name if loc else "?"
-        title = f"  {loc_name}    budget {self.env.budget_remaining}    step {self.state.current_step}"
-        self.screen.blit(self.font_lg.render(title, True, HUD_TEXT), (8, room_h_px + 6))
+        victim = self.state.characters.get(self.state.victim_id)
+        v_name = victim.full_name if victim else "?"
+        text = (
+            f" 🕵️  {loc_name}     ⏱ step {self.state.current_step}     "
+            f"⚖ budget {self.env.budget_remaining}     ☠ victim: {v_name}"
+        )
+        self.screen.blit(self.font_lg.render(text, True, HUD_TEXT), (8, 8))
 
-        # Wrap observation across HUD strip
+    def _draw_status_line(self) -> None:
+        room_h_px = self.current_layout.height * TILE_PX
+        y0 = TOPBAR_H + room_h_px
+        bar = pygame.Rect(0, y0, self.win_w, STATUS_H)
+        pygame.draw.rect(self.screen, HUD_BG, bar)
+        pygame.draw.rect(self.screen, HUD_BORDER, bar, 1)
+
+        # Show only the latest two lines of the action result + a controls hint.
         max_chars = max(40, (self.win_w - 24) // 9)
+        # Take the most recent paragraph only (drop the briefing)
+        last = (self.last_observation or "").strip().splitlines()
+        compact: list[str] = []
+        for line in reversed(last):
+            line = line.strip()
+            if line:
+                compact.insert(0, line)
+                if len(compact) >= 2:
+                    break
         wrapped: list[str] = []
-        for paragraph in (self.last_observation or "").splitlines():
+        for line in compact:
+            wrapped.extend(textwrap.wrap(line, max_chars) or [""])
+        for i, line in enumerate(wrapped[:2]):
+            self.screen.blit(self.font_md.render(line, True, HUD_TEXT), (12, y0 + 6 + i * 22))
+
+        # Toast in bottom-right
+        if self.toast and pygame.time.get_ticks() < self.toast_until_ms:
+            surf = self.font_md.render(self.toast, True, HUD_TEXT)
+            r = surf.get_rect(bottomright=(self.win_w - 12, y0 + STATUS_H - 6))
+            bg = r.inflate(12, 6)
+            pygame.draw.rect(self.screen, PROMPT_BG, bg)
+            pygame.draw.rect(self.screen, PROMPT_BORDER, bg, 1)
+            self.screen.blit(surf, r)
+
+    # ------------------------------------------------------------------
+    # Right-hand notebook: Case File / Interviews / Evidence
+    # ------------------------------------------------------------------
+
+    def _sidebar_rect(self) -> pygame.Rect:
+        room_w_px = self.current_layout.width * TILE_PX
+        room_h_px = self.current_layout.height * TILE_PX
+        return pygame.Rect(room_w_px, TOPBAR_H, SIDEBAR_W, room_h_px)
+
+    def _draw_sidebar(self) -> None:
+        sb = self._sidebar_rect()
+        pygame.draw.rect(self.screen, HUD_BG, sb)
+        pygame.draw.rect(self.screen, HUD_BORDER, sb, 1)
+
+        # Tab strip
+        tab_strip = pygame.Rect(sb.x, sb.y, sb.w, TAB_BAR_H)
+        pygame.draw.rect(self.screen, (24, 22, 30), tab_strip)
+        tab_w = sb.w // len(TAB_NAMES)
+        for i, name in enumerate(TAB_NAMES):
+            tab = pygame.Rect(sb.x + i * tab_w, sb.y, tab_w, TAB_BAR_H)
+            if i == self.active_tab:
+                pygame.draw.rect(self.screen, HUD_BG, tab)
+                pygame.draw.line(
+                    self.screen, PROMPT_BORDER,
+                    (tab.x + 6, tab.bottom - 2), (tab.right - 6, tab.bottom - 2), 2,
+                )
+            self.screen.blit(
+                self.font_md.render(name, True, HUD_TEXT),
+                (tab.x + 8, tab.y + 7),
+            )
+        pygame.draw.line(self.screen, HUD_BORDER, (sb.x, sb.y + TAB_BAR_H), (sb.right, sb.y + TAB_BAR_H), 1)
+
+        # Body
+        body = pygame.Rect(sb.x, sb.y + TAB_BAR_H, sb.w, sb.h - TAB_BAR_H)
+        if self.active_tab == TAB_CASE:
+            self._draw_case_tab(body)
+        elif self.active_tab == TAB_INTERVIEWS:
+            self._draw_interviews_tab(body)
+        else:
+            self._draw_evidence_tab(body)
+
+    # --- helpers for sidebar text rendering ---
+
+    def _wrap(self, text: str, width_chars: int) -> list[str]:
+        out: list[str] = []
+        for paragraph in (text or "").splitlines():
             if not paragraph.strip():
-                wrapped.append("")
-                continue
-            wrapped.extend(textwrap.wrap(paragraph, max_chars) or [""])
-        for i, line in enumerate(wrapped[:9]):
-            surf = self.font_md.render(line, True, HUD_TEXT)
-            self.screen.blit(surf, (12, room_h_px + 36 + i * 18))
+                out.append("")
+            else:
+                out.extend(textwrap.wrap(paragraph, width_chars) or [""])
+        return out
 
-        # Sidebar: hint + people/objects-in-room
-        sidebar_rect = pygame.Rect(room_w_px, 0, SIDEBAR_W, room_h_px)
-        pygame.draw.rect(self.screen, HUD_BG, sidebar_rect)
-        pygame.draw.rect(self.screen, HUD_BORDER, sidebar_rect, 2)
+    def _render_lines(
+        self,
+        body: pygame.Rect,
+        lines: list[tuple[str, tuple[int, int, int]]],
+        scroll: int,
+    ) -> None:
+        """Lines are (text, color) tuples. Clipped to the body rect, scrolled."""
+        clip = self.screen.get_clip()
+        self.screen.set_clip(body)
+        y = body.y + 8 - scroll
+        line_h = 18
+        for text, color in lines:
+            if y + line_h >= body.y and y < body.bottom:
+                surf = self.font_sm.render(text, True, color)
+                self.screen.blit(surf, (body.x + 10, y))
+            y += line_h
+        self.screen.set_clip(clip)
 
-        x0 = room_w_px + 10
-        y = 10
-        self.screen.blit(self.font_lg.render("HERE", True, HUD_TEXT), (x0, y))
-        y += 26
+    # --- Case File tab ---
+
+    def _draw_case_tab(self, body: pygame.Rect) -> None:
+        from mystery_world.entities import CharacterRole
+
+        loc = self.state.locations.get(self.env.agent_location_id)
+        victim = self.state.characters.get(self.state.victim_id)
+        body_loc = self.state.locations.get(self.state.body_location_id)
+        body_w_chars = max(20, (body.w - 24) // 8)
+
+        lines: list[tuple[str, tuple[int, int, int]]] = []
+
+        def _h(text: str) -> None:
+            lines.append((text, HUD_TEXT))
+
+        def _b(text: str) -> None:
+            lines.append((text, HUD_DIM))
+
+        _h("THE CASE")
+        if victim:
+            _b(f"Victim:  {victim.full_name}")
+        if body_loc:
+            _b(f"Found in: {body_loc.name}")
+        evidence_total = len([e for e in self.state.evidence.values() if not e.is_red_herring])
+        _b(f"Evidence found: {len(self.env._discovered_evidence)} / {evidence_total}")
+        lines.append(("", HUD_DIM))
+
+        _h("SUSPECTS")
+        suspects = [
+            c for c in self.state.characters.values()
+            if CharacterRole.SUSPECT in c.roles and c.is_alive
+        ]
+        for s in sorted(suspects, key=lambda c: c.full_name):
+            seen = self.last_seen.get(s.id, "?")
+            interviewed = s.id in self.env._interviewed_characters
+            mark = "✓" if interviewed else "•"
+            _h(f"  {mark} {s.full_name}")
+            _b(f"      last seen: {seen}")
+            if s.motive:
+                for line in self._wrap(f"motive: {s.motive}", body_w_chars - 6):
+                    _b(f"      {line}")
+        lines.append(("", HUD_DIM))
+
+        _h("INNOCENTS / WITNESSES")
+        innocents = [
+            c for c in self.state.characters.values()
+            if CharacterRole.SUSPECT not in c.roles
+            and c.id != self.state.victim_id
+            and c.is_alive
+        ]
+        for s in sorted(innocents, key=lambda c: c.full_name):
+            seen = self.last_seen.get(s.id, "?")
+            interviewed = s.id in self.env._interviewed_characters
+            mark = "✓" if interviewed else "•"
+            _b(f"  {mark} {s.full_name}  ({seen})")
+        lines.append(("", HUD_DIM))
+
         if loc:
+            _h(f"HERE — {loc.name}")
             for cid in loc.characters_here:
                 ch = self.state.characters.get(cid)
                 if ch:
-                    color = HUD_TEXT if ch.is_alive else HUD_DIM
-                    self.screen.blit(self.font_sm.render(f"• {ch.full_name}", True, color), (x0, y))
-                    y += 16
-            if loc.objects_here:
-                y += 4
-                for oid in loc.objects_here:
-                    obj = self.state.objects.get(oid)
-                    if obj:
-                        self.screen.blit(self.font_sm.render(f"– {obj.name}", True, HUD_DIM), (x0, y))
-                        y += 16
-            y += 8
-            self.screen.blit(self.font_lg.render("EXITS", True, HUD_TEXT), (x0, y))
-            y += 26
+                    _b(f"  · {ch.full_name}{'' if ch.is_alive else ' (deceased)'}")
+            for oid in loc.objects_here:
+                obj = self.state.objects.get(oid)
+                if obj:
+                    _b(f"  – {obj.name}")
+            lines.append(("", HUD_DIM))
+            _h("EXITS")
             for aid in loc.adjacent_ids:
                 adj = self.state.locations.get(aid)
                 if adj:
-                    self.screen.blit(self.font_sm.render(f"→ {adj.name}", True, HUD_DIM), (x0, y))
-                    y += 16
+                    _b(f"  → {adj.name}")
+            lines.append(("", HUD_DIM))
 
-        # Toast (bottom-right, time-limited)
-        if self.toast and pygame.time.get_ticks() < self.toast_until_ms:
-            surf = self.font_md.render(self.toast, True, HUD_TEXT)
-            pad = 8
-            rect = surf.get_rect()
-            rect.bottomright = (self.win_w - 12, room_h_px - 12)
-            bg = rect.inflate(pad * 2, pad)
-            pygame.draw.rect(self.screen, PROMPT_BG, bg)
-            pygame.draw.rect(self.screen, PROMPT_BORDER, bg, 2)
-            self.screen.blit(surf, rect)
+        _h("CONTROLS")
+        for ln in [
+            "WASD  walk",
+            "E     interact",
+            "1/2/3 switch tab",
+            "↑↓    scroll tab",
+            "ESC   menu",
+        ]:
+            _b(f"  {ln}")
+
+        self._render_lines(body, lines, self._scroll[TAB_CASE])
+
+    # --- Interviews tab ---
+
+    def _draw_interviews_tab(self, body: pygame.Rect) -> None:
+        body_w_chars = max(20, (body.w - 24) // 8)
+        histories = self.env._interview_histories  # {char_id: [{role, content}, ...]}
+
+        lines: list[tuple[str, tuple[int, int, int]]] = []
+        if not histories:
+            lines.append(("(No interviews yet — talk to an NPC with E.)", HUD_DIM))
+        else:
+            for cid, hist in histories.items():
+                char = self.state.characters.get(cid)
+                if not char:
+                    continue
+                lines.append((char.full_name.upper(), HUD_TEXT))
+                lines.append(("─" * (body_w_chars - 2), HUD_DIM))
+                for msg in hist:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    label = "Q" if role == "user" else "A"
+                    color = HUD_TEXT if role == "user" else HUD_DIM
+                    for i, line in enumerate(self._wrap(content, body_w_chars - 4)):
+                        prefix = f"{label}: " if i == 0 else "   "
+                        lines.append((prefix + line, color))
+                lines.append(("", HUD_DIM))
+
+        self._render_lines(body, lines, self._scroll[TAB_INTERVIEWS])
+
+    # --- Evidence tab ---
+
+    def _draw_evidence_tab(self, body: pygame.Rect) -> None:
+        body_w_chars = max(20, (body.w - 24) // 8)
+        lines: list[tuple[str, tuple[int, int, int]]] = []
+
+        if not self.env._discovered_evidence:
+            lines.append(("(No evidence collected yet — examine objects with E.)", HUD_DIM))
+        else:
+            for eid in self.env._discovered_evidence:
+                ev = self.state.evidence.get(eid)
+                if not ev:
+                    continue
+                lines.append((f"[{ev.id}]  {ev.name}", HUD_TEXT))
+                edge = ev.relevance.edge_type.name if ev.relevance else "—"
+                loc = self.state.locations.get(ev.location_id)
+                loc_name = loc.name if loc else "?"
+                lines.append((f"  {ev.evidence_type.name.lower()} · {edge} · {loc_name}", HUD_DIM))
+                for line in self._wrap(ev.description, body_w_chars - 4):
+                    lines.append(("  " + line, HUD_DIM))
+                lines.append(("", HUD_DIM))
+
+        self._render_lines(body, lines, self._scroll[TAB_EVIDENCE])
 
     def _draw_modal(self) -> None:
         if not self.modal:
@@ -583,6 +802,16 @@ class MysteryGame:
                         self._open_menu()
                     elif event.key == INTERACT_KEY:
                         self._interact_at_player()
+                    elif event.key in (pygame.K_1, pygame.K_KP1):
+                        self.active_tab = TAB_CASE
+                    elif event.key in (pygame.K_2, pygame.K_KP2):
+                        self.active_tab = TAB_INTERVIEWS
+                    elif event.key in (pygame.K_3, pygame.K_KP3):
+                        self.active_tab = TAB_EVIDENCE
+                    elif event.key in (pygame.K_UP, pygame.K_PAGEUP):
+                        self._scroll[self.active_tab] = max(0, self._scroll[self.active_tab] - 36)
+                    elif event.key in (pygame.K_DOWN, pygame.K_PAGEDOWN):
+                        self._scroll[self.active_tab] += 36
 
             # ---- continuous movement (only if no modal/menu and game live) ----
             if (
@@ -593,13 +822,14 @@ class MysteryGame:
             ):
                 keys = pygame.key.get_pressed()
                 vx = vy = 0.0
-                if keys[pygame.K_w] or keys[pygame.K_UP]:
+                # WASD only — arrow keys are reserved for sidebar scroll.
+                if keys[pygame.K_w]:
                     vy -= 1
-                if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+                if keys[pygame.K_s]:
                     vy += 1
-                if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+                if keys[pygame.K_a]:
                     vx -= 1
-                if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+                if keys[pygame.K_d]:
                     vx += 1
                 if vx or vy:
                     norm = (vx * vx + vy * vy) ** 0.5
@@ -609,11 +839,13 @@ class MysteryGame:
 
             # ---- draw ----
             self.screen.fill(BG_COLOR)
+            self._draw_topbar()
             self._draw_room()
             self._draw_objects()
             self._draw_characters()
             self._draw_player()
-            self._draw_hud()
+            self._draw_status_line()
+            self._draw_sidebar()
             self._draw_menu()
             self._draw_modal()
             self._draw_endscreen()
