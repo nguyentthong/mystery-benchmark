@@ -295,20 +295,221 @@ class ProceduralSprites(SpriteLoader):
         ])
         pygame.draw.circle(surface, (240, 160, 60), (body.right - 8, body.y + 8), 4)
 
+    # --- additional pictographs ---
+
+    @staticmethod
+    def _draw_glass(surface, rect):
+        """Drinking glass / tumbler with lipstick smudge."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.55)
+        # Tapered tumbler shape (slightly narrower at base)
+        top_w = s
+        bot_w = int(s * 0.78)
+        top = cy - s // 2
+        bot = cy + s // 2
+        pts = [
+            (cx - top_w // 2, top),
+            (cx + top_w // 2, top),
+            (cx + bot_w // 2, bot),
+            (cx - bot_w // 2, bot),
+        ]
+        # Glass body — translucent pale blue
+        pygame.draw.polygon(surface, (190, 215, 230), pts)
+        pygame.draw.polygon(surface, (40, 60, 70), pts, 2)
+        # Liquid line near the top
+        pygame.draw.line(surface, (60, 110, 150),
+                         (cx - top_w // 2 + 3, top + 6),
+                         (cx + top_w // 2 - 3, top + 6), 2)
+        # Lipstick smudge on the rim
+        pygame.draw.arc(surface, (200, 50, 80),
+                        (cx + top_w // 6, top - 2, top_w // 4, 6),
+                        0, 3.14159, 3)
+
+    @staticmethod
+    def _draw_basket(surface, rect):
+        """Wicker basket — woven cross-hatch pattern with handle arc."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.65)
+        body = pygame.Rect(cx - s // 2, cy - s // 6, s, 2 * s // 3)
+        # Body
+        pygame.draw.rect(surface, (170, 110, 60), body, border_radius=4)
+        pygame.draw.rect(surface, (60, 30, 15), body, 2, border_radius=4)
+        # Wicker weave: diagonal lines both ways
+        for dx in range(-s // 2 + 4, s // 2, 5):
+            pygame.draw.line(surface, (110, 70, 40),
+                             (cx + dx, body.y + 2),
+                             (cx + dx + 6, body.bottom - 2), 1)
+            pygame.draw.line(surface, (130, 85, 50),
+                             (cx + dx, body.bottom - 2),
+                             (cx + dx + 6, body.y + 2), 1)
+        # Handle arc above
+        pygame.draw.arc(surface, (60, 30, 15),
+                        (cx - s // 2 + 4, body.y - s // 3, s - 8, s // 2),
+                        0, 3.14159, 3)
+
+    @staticmethod
+    def _draw_chess(surface, rect):
+        """Chess board with a couple of piece silhouettes."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.7)
+        # 4x4 checker pattern (close enough at icon size)
+        cell = s // 4
+        x0 = cx - s // 2
+        y0 = cy - s // 2
+        for r in range(4):
+            for c in range(4):
+                color = (240, 220, 180) if (r + c) % 2 == 0 else (90, 60, 30)
+                pygame.draw.rect(surface, color,
+                                 (x0 + c * cell, y0 + r * cell, cell, cell))
+        pygame.draw.rect(surface, (40, 25, 15), (x0, y0, s, s), 2)
+        # Two simple pawn silhouettes (one light, one dark)
+        for (px, py, pcolor) in [
+            (x0 + cell // 2, y0 + cell // 2, (255, 255, 255)),
+            (x0 + 3 * cell + cell // 2, y0 + 3 * cell + cell // 2, (20, 20, 20)),
+        ]:
+            pygame.draw.circle(surface, pcolor, (px, py), max(2, cell // 3))
+            pygame.draw.circle(surface, (40, 25, 15), (px, py), max(2, cell // 3), 1)
+
+    @staticmethod
+    def _draw_radiator(surface, rect):
+        """Old cast-iron radiator: stack of vertical fins."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.7)
+        body = pygame.Rect(cx - s // 2, cy - s // 2, s, s)
+        # Backing plate
+        pygame.draw.rect(surface, (140, 140, 145), body, border_radius=2)
+        pygame.draw.rect(surface, (40, 40, 50), body, 2, border_radius=2)
+        # Vertical fins
+        n_fins = 6
+        gap = s // (n_fins + 1)
+        for i in range(1, n_fins + 1):
+            fx = body.x + i * gap
+            pygame.draw.line(surface, (60, 60, 70), (fx, body.y + 4), (fx, body.bottom - 4), 2)
+
+    @staticmethod
+    def _draw_fireplace(surface, rect):
+        """Fireplace with hearth + flame."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.7)
+        # Mantel (wider than hearth)
+        mantel = pygame.Rect(cx - s // 2, cy - s // 2, s, s // 6)
+        pygame.draw.rect(surface, (90, 70, 50), mantel)
+        pygame.draw.rect(surface, (30, 20, 10), mantel, 2)
+        # Hearth opening
+        hearth = pygame.Rect(cx - s // 3, cy - s // 3, 2 * s // 3, 2 * s // 3)
+        pygame.draw.rect(surface, (30, 20, 15), hearth)
+        pygame.draw.rect(surface, (60, 40, 25), hearth, 2)
+        # Flame
+        pygame.draw.polygon(surface, (240, 130, 50), [
+            (cx, cy - s // 6),
+            (cx - s // 8, cy + s // 6),
+            (cx + s // 8, cy + s // 6),
+        ])
+        pygame.draw.polygon(surface, (240, 200, 80), [
+            (cx, cy + s // 12),
+            (cx - s // 16, cy + s // 6),
+            (cx + s // 16, cy + s // 6),
+        ])
+
+    @staticmethod
+    def _draw_boots(surface, rect):
+        """A pair of boots seen from the side."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.6)
+        for offset in (-s // 4, s // 4):
+            # Boot body (L-shape)
+            shaft = pygame.Rect(cx + offset - s // 8, cy - s // 3, s // 4, s // 2)
+            foot = pygame.Rect(cx + offset - s // 8, cy + s // 8, s // 3, s // 6)
+            pygame.draw.rect(surface, (80, 50, 30), shaft, border_radius=2)
+            pygame.draw.rect(surface, (80, 50, 30), foot, border_radius=2)
+            pygame.draw.rect(surface, (20, 10, 5), shaft, 1, border_radius=2)
+            pygame.draw.rect(surface, (20, 10, 5), foot, 1, border_radius=2)
+
+    @staticmethod
+    def _draw_glove(surface, rect):
+        """A glove silhouette."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.55)
+        # Palm
+        palm = pygame.Rect(cx - s // 3, cy - s // 6, 2 * s // 3, s // 2)
+        pygame.draw.rect(surface, (180, 220, 220), palm, border_radius=4)
+        pygame.draw.rect(surface, (40, 50, 60), palm, 2, border_radius=4)
+        # Fingers (4 small rectangles up top)
+        finger_w = (palm.w - 8) // 4
+        for i in range(4):
+            f = pygame.Rect(palm.x + 2 + i * (finger_w + 2),
+                            palm.y - s // 3, finger_w, s // 3)
+            pygame.draw.rect(surface, (180, 220, 220), f, border_radius=2)
+            pygame.draw.rect(surface, (40, 50, 60), f, 1, border_radius=2)
+        # Thumb (sticks out left)
+        thumb = pygame.Rect(palm.x - s // 8, cy, s // 4, s // 4)
+        pygame.draw.rect(surface, (180, 220, 220), thumb, border_radius=4)
+        pygame.draw.rect(surface, (40, 50, 60), thumb, 1, border_radius=4)
+
+    @staticmethod
+    def _draw_safe(surface, rect):
+        """Combination safe with a dial."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.65)
+        body = pygame.Rect(cx - s // 2, cy - s // 2, s, s)
+        pygame.draw.rect(surface, (70, 70, 80), body, border_radius=2)
+        pygame.draw.rect(surface, (30, 30, 35), body, 3, border_radius=2)
+        # Dial
+        pygame.draw.circle(surface, (40, 40, 45), (cx + s // 6, cy), s // 6)
+        pygame.draw.circle(surface, (200, 200, 210), (cx + s // 6, cy), s // 6, 2)
+        # Dial pointer
+        pygame.draw.line(surface, (220, 200, 80),
+                         (cx + s // 6, cy), (cx + s // 6, cy - s // 6 + 3), 2)
+        # Hinge
+        pygame.draw.rect(surface, (200, 200, 210),
+                         (body.x + 3, body.y + s // 5, 4, 4))
+        pygame.draw.rect(surface, (200, 200, 210),
+                         (body.x + 3, body.bottom - s // 5 - 4, 4, 4))
+
+    @staticmethod
+    def _draw_flower(surface, rect):
+        """Wilted bouquet — drooping flower silhouette."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.6)
+        # Stem
+        pygame.draw.line(surface, (90, 110, 60), (cx, cy + s // 3), (cx + s // 6, cy - s // 6), 3)
+        # Petals (drooping)
+        head_x = cx + s // 6
+        head_y = cy - s // 6
+        for ang_offset, color in [(0, (220, 130, 130)), (60, (220, 130, 130)),
+                                   (120, (220, 130, 130)), (180, (220, 130, 130))]:
+            from math import sin, cos, radians
+            ang = radians(ang_offset + 30)
+            px = head_x + int(s // 6 * cos(ang))
+            py = head_y + int(s // 6 * sin(ang)) + 4   # droop
+            pygame.draw.circle(surface, color, (px, py), max(3, s // 12))
+        # Centre
+        pygame.draw.circle(surface, (220, 200, 80), (head_x, head_y + 2), max(2, s // 14))
+
     # Library: keys to look for (lowercased) -> draw callback.
-    # Long, specific keys first.
+    # Long, specific keys first so e.g. "fireplace mantel" matches fireplace
+    # before "mantel" / chair fallback.
     _ICON_LIBRARY = [
+        (("fireplace",),                   _draw_fireplace),
+        (("radiator",),                    _draw_radiator),
+        (("chess",),                       _draw_chess),
+        (("basket",),                      _draw_basket),
+        (("glass", "tumbler", "goblet"),   _draw_glass),
+        (("safe", "vault"),                _draw_safe),
+        (("boots", "shoes"),               _draw_boots),
+        (("glove",),                       _draw_glove),
+        (("bouquet", "flowers", "rose"),   _draw_flower),
         (("mirror",),                      _draw_mirror),
         (("clock", "watch", "timepiece"),  _draw_clock),
-        (("candle", "candelabra", "lamp"), _draw_candle),
-        (("book", "diary", "journal", "ledger", "tome"), _draw_book),
+        (("candle", "candelabra", "lamp", "lantern"), _draw_candle),
+        (("book", "diary", "journal", "ledger", "tome", "shelf"), _draw_book),
         (("vase", "urn", "pot"),           _draw_vase),
         (("key",),                         _draw_key),
-        (("letter", "note", "envelope", "telegram", "memo"), _draw_letter),
+        (("letter", "note", "envelope", "telegram", "memo", "receipt", "ticket"), _draw_letter),
         (("umbrella", "parasol"),          _draw_umbrella),
         (("bottle", "decanter", "flask", "vial"), _draw_bottle),
         (("pistol", "revolver", "rifle", "shotgun", "firearm"), _draw_gun),
-        (("rug", "carpet", "tapestry"),    _draw_rug),
+        (("rug", "carpet", "tapestry", "curtain"), _draw_rug),
         (("painting", "portrait", "canvas", "frame"), _draw_painting),
     ]
 
