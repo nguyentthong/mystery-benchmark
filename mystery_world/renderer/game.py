@@ -32,7 +32,12 @@ import pygame
 
 from mystery_world.entities import Character, EvidenceState, Location, WorldObject
 from mystery_world.narrator import render_initial_briefing, render_step_observation
-from mystery_world.renderer.layout import RoomLayout, Tile, build_room_layout
+from mystery_world.renderer.layout import (
+    RoomLayout,
+    Tile,
+    build_room_layout,
+    compute_door_pairings,
+)
 from mystery_world.renderer.sprites import EmojiSprites, ProceduralSprites, SpriteLoader
 from mystery_world.world import AgentAction, MysteryEnvironment
 
@@ -139,6 +144,10 @@ class MysteryGame:
         self.sprites: SpriteLoader = sprites or EmojiSprites()
 
         self._layouts: dict[str, RoomLayout] = {}
+        # Pre-compute global door pairings so paired doors land on opposite
+        # sides between connected rooms (walking through A's NORTH door
+        # spawns you at B's SOUTH side, etc.).
+        self._door_pairings = compute_door_pairings(env.state)
         self.current_layout: RoomLayout = self._layout_for(env.agent_location_id)
 
         # Player position in pixels (centre of the avatar)
@@ -261,7 +270,8 @@ class MysteryGame:
     def _layout_for(self, location_id: str) -> RoomLayout:
         if location_id not in self._layouts:
             loc = self.state.locations[location_id]
-            self._layouts[location_id] = build_room_layout(loc)
+            sides = self._door_pairings.get(location_id, {})
+            self._layouts[location_id] = build_room_layout(loc, neighbor_sides=sides)
         layout = self._layouts[location_id]
         # Refresh dynamic content (NPCs may have moved between steps)
         self._refresh_dynamic_content(layout)

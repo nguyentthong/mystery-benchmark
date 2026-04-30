@@ -29,7 +29,12 @@ if TYPE_CHECKING:
 import pygame
 
 from mystery_world.entities import EvidenceState
-from mystery_world.renderer.layout import RoomLayout, Tile, build_room_layout
+from mystery_world.renderer.layout import (
+    RoomLayout,
+    Tile,
+    build_room_layout,
+    compute_door_pairings,
+)
 from mystery_world.renderer.sprites import ProceduralSprites, SpriteLoader
 from mystery_world.world import MysteryEnvironment
 
@@ -64,12 +69,22 @@ def _ensure_pygame() -> None:
 # ---------------------------------------------------------------------------
 
 _layout_cache: dict[str, RoomLayout] = {}
+_door_pairings_cache: dict[int, dict[str, dict[str, str]]] = {}
+
+
+def _pairings_for(env: MysteryEnvironment) -> dict[str, dict[str, str]]:
+    """Cache door pairings by world-state seed so a fresh world recomputes."""
+    key = id(env.state)
+    if key not in _door_pairings_cache:
+        _door_pairings_cache[key] = compute_door_pairings(env.state)
+    return _door_pairings_cache[key]
 
 
 def _layout_for(env: MysteryEnvironment, location_id: str) -> RoomLayout:
     if location_id not in _layout_cache:
         loc = env.state.locations[location_id]
-        _layout_cache[location_id] = build_room_layout(loc)
+        sides = _pairings_for(env).get(location_id, {})
+        _layout_cache[location_id] = build_room_layout(loc, neighbor_sides=sides)
     layout = _layout_cache[location_id]
     # Refresh dynamic content (NPCs may have moved into / out of this room)
     loc = env.state.locations[location_id]

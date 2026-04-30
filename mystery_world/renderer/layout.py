@@ -80,8 +80,66 @@ class RoomLayout:
         return None
 
 
-def build_room_layout(location: Location) -> RoomLayout:
-    """Deterministically tile-out a single location."""
+def compute_door_pairings(world_state) -> dict[str, dict[str, str]]:
+    """Globally assign which cardinal side each room uses for each neighbour
+    so that paired doors land on OPPOSITE sides:
+
+        A.door_to(B) is on side S  ⇔  B.door_to(A) is on _OPPOSITE[S]
+
+    Greedy + deterministic: walks pairs in sorted order and picks the first
+    side pair where neither side is already used by either room. Falls back
+    to independent free-side picks if no compatible pair exists (rare —
+    only when a room has 4+ adjacencies whose neighbours have already
+    consumed conflicting sides).
+    """
+    locations = world_state.locations
+    sides_for: dict[str, dict[str, str]] = {lid: {} for lid in locations}
+    seen: set[tuple[str, str]] = set()
+
+    for loc_id in sorted(locations):
+        loc = locations[loc_id]
+        for n_id in sorted(loc.adjacent_ids):
+            if n_id not in locations:
+                continue
+            pair = tuple(sorted([loc_id, n_id]))
+            if pair in seen:
+                continue
+            seen.add(pair)
+
+            used_a = set(sides_for[loc_id].values())
+            used_b = set(sides_for[n_id].values())
+            assigned = False
+            for side in _SIDES:
+                opp = _OPPOSITE[side]
+                if side not in used_a and opp not in used_b:
+                    sides_for[loc_id][n_id] = side
+                    sides_for[n_id][loc_id] = opp
+                    assigned = True
+                    break
+            if not assigned:
+                # Fallback: pick any free side per room independently.
+                for side in _SIDES:
+                    if side not in used_a:
+                        sides_for[loc_id][n_id] = side
+                        break
+                for side in _SIDES:
+                    if side not in used_b:
+                        sides_for[n_id][loc_id] = side
+                        break
+    return sides_for
+
+
+def build_room_layout(
+    location: Location,
+    neighbor_sides: dict[str, str] | None = None,
+) -> RoomLayout:
+    """Deterministically tile-out a single location.
+
+    neighbor_sides : dict[neighbor_id, side]  — if provided, place each
+      adjacent_id's door on the named side. Without it, falls back to the
+      legacy "sort neighbor ids and assign N/S/E/W in order" scheme, which
+      doesn't pair doors between rooms.
+    """
     rng = random.Random(f"layout::{location.id}")
 
     tiles: list[list[Tile]] = [
@@ -91,17 +149,29 @@ def build_room_layout(location: Location) -> RoomLayout:
         for y in range(1, ROOM_H - 1):
             tiles[x][y] = Tile.FLOOR
 
-    # Pick door sides for each adjacency. Sort for determinism, cap at 4.
-    adj_ids = sorted(location.adjacent_ids)[:4]
+    # Pick door sides per adjacency. If a global pairing is provided use it
+    # so doors line up between rooms; otherwise fall back to sorted-id order.
     doors: dict[tuple[int, int], str] = {}
     spawn_from: dict[str, tuple[int, int]] = {}
-    for i, adj_id in enumerate(adj_ids):
-        side = _SIDES[i]
-        dx, dy = _DOOR_TILES[side]
-        tiles[dx][dy] = Tile.DOOR
-        doors[(dx, dy)] = adj_id
-        ox, oy = _SPAWN_OFFSET[side]
-        spawn_from[adj_id] = (dx + ox, dy + oy)
+    if neighbor_sides:
+        # Use only adj_ids that have an assigned side (skip extras > 4 sides)
+        for adj_id, side in neighbor_sides.items():
+            if adj_id not in location.adjacent_ids or side not in _DOOR_TILES:
+                continue
+            dx, dy = _DOOR_TILES[side]
+            tiles[dx][dy] = Tile.DOOR
+            doors[(dx, dy)] = adj_id
+            ox, oy = _SPAWN_OFFSET[side]
+            spawn_from[adj_id] = (dx + ox, dy + oy)
+    else:
+        adj_ids = sorted(location.adjacent_ids)[:4]
+        for i, adj_id in enumerate(adj_ids):
+            side = _SIDES[i]
+            dx, dy = _DOOR_TILES[side]
+            tiles[dx][dy] = Tile.DOOR
+            doors[(dx, dy)] = adj_id
+            ox, oy = _SPAWN_OFFSET[side]
+            spawn_from[adj_id] = (dx + ox, dy + oy)
 
     # Reserve the default spawn (room centre) and the four tiles cardinally
     # adjacent to it so the player isn't surrounded by props on entry.
