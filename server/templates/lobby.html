@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MysteryArena</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 2.5rem 1rem;
+      font: 16px/1.5 system-ui, sans-serif;
+      background: #15131c; color: #ebe3d6;
+      display: flex; justify-content: center;
+    }
+    .card {
+      max-width: 520px; width: 100%;
+      background: #1d1a26; padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.4);
+      border: 1px solid #2c2638;
+    }
+    h1 { margin-top: 0; font-size: 1.6rem; letter-spacing: .02em; }
+    .subtitle { color: #968c7a; margin-top: -.5rem; margin-bottom: 1.5rem; }
+    label { display: block; margin: 1rem 0 .35rem; font-size: .9rem; color: #c8bfac; }
+    select, input {
+      width: 100%; box-sizing: border-box;
+      padding: .65rem .8rem;
+      background: #0f0d14; color: #ebe3d6;
+      border: 1px solid #2c2638; border-radius: 6px;
+      font: inherit;
+    }
+    input:focus, select:focus { outline: 2px solid #b3884a; }
+    button {
+      margin-top: 1.6rem; width: 100%; padding: .8rem;
+      background: #b3884a; color: #15131c; border: none;
+      font: 600 16px system-ui; border-radius: 6px;
+      cursor: pointer; letter-spacing: .03em;
+    }
+    button:hover { background: #d4a164; }
+    .hint { color: #968c7a; font-size: .82rem; margin-top: .35rem; }
+    .key-row { font-size: .82rem; color: #968c7a; margin-top: 1.5rem; line-height: 1.7; }
+    code {
+      background: #0f0d14; padding: 0 .3em; border-radius: 3px;
+      color: #d4a164; font-size: .9em;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>MysteryArena</h1>
+    <p class="subtitle">A procedural murder-mystery. You have a fixed action budget. Solve who, what, where.</p>
+
+    <form method="POST" action="/start">
+      <label for="level">Difficulty</label>
+      <select id="level" name="level">
+        {% for lvl in levels %}
+        <option value="{{ lvl }}" {% if lvl == 'EASY' %}selected{% endif %}>{{ lvl }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="seed">Seed (blank = random)</label>
+      <input id="seed" name="seed" type="number" placeholder="random" />
+
+      <label for="api_key">OpenAI API key (optional)</label>
+      <input id="api_key" name="api_key" type="password" placeholder="sk-..." autocomplete="off" />
+      <div class="hint">
+        Optional — paste your own <code>sk-...</code> key for ChatGPT-powered NPC interviews
+        (model: gpt-4o-mini). Leave blank for the deterministic fallback. The key is sent
+        once to this server and used only for your session; it is never stored.
+      </div>
+
+      <button type="submit">Start</button>
+    </form>
+
+    <div class="key-row">
+      <strong>Controls</strong> &nbsp; <code>WASD</code> walk · <code>E</code> interact ·
+      <code>1</code>/<code>2</code>/<code>3</code> tabs · <code>↑</code>/<code>↓</code> scroll · <code>Esc</code> menu
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MysteryArena — {{ level }} #{{ seed }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; padding: 0; background: #0e0c14; color: #ebe3d6; font: 14px system-ui, sans-serif; height: 100%; overflow: hidden; }
+    body { display: flex; flex-direction: column; align-items: center; }
+    .stage {
+      position: relative;
+      margin: 1rem; padding: 0;
+      background: #15131c;
+      border: 1px solid #2c2638;
+      border-radius: 6px;
+      box-shadow: 0 2px 18px rgba(0,0,0,.5);
+    }
+    canvas { display: block; max-width: 95vw; height: auto; image-rendering: pixelated; }
+    .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(15,13,20,.85); pointer-events: none; }
+    .overlay span { font-size: 1.1rem; color: #d4a164; }
+    .topnote {
+      width: 100%; max-width: 1200px; box-sizing: border-box;
+      padding: .5rem 1rem; color: #968c7a; font-size: .82rem;
+      display: flex; justify-content: space-between;
+    }
+    .topnote a { color: #b3884a; text-decoration: none; }
+    .topnote a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="topnote">
+    <span>{{ level }} · seed {{ seed }} · NPCs: {{ ai }}</span>
+    <a href="/">← lobby</a>
+  </div>
+
+  <div class="stage">
+    <canvas id="canvas" width="{{ win_w }}" height="{{ win_h }}"></canvas>
+    <div id="overlay" class="overlay"><span>Connecting…</span></div>
+  </div>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d", { alpha: false });
+      const overlay = document.getElementById("overlay");
+
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const url = `${proto}://${location.host}/ws/{{ session_id }}`;
+      let ws = null;
+      let img = new Image();
+      let pendingObj = null;
+      let connectAttempts = 0;
+
+      function connect() {
+        ws = new WebSocket(url);
+        ws.binaryType = "arraybuffer";
+
+        ws.onopen = () => {
+          overlay.style.display = "none";
+          connectAttempts = 0;
+          // tell server we're alive every 15s so idle timeout doesn't kick us
+          setInterval(() => {
+            if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "ping" }));
+          }, 15000);
+        };
+
+        ws.onmessage = (ev) => {
+          // Frame: PNG bytes
+          const blob = new Blob([ev.data], { type: "image/png" });
+          const oldUrl = pendingObj;
+          pendingObj = URL.createObjectURL(blob);
+          const fresh = new Image();
+          fresh.onload = () => {
+            ctx.drawImage(fresh, 0, 0, canvas.width, canvas.height);
+            if (oldUrl) URL.revokeObjectURL(oldUrl);
+          };
+          fresh.src = pendingObj;
+        };
+
+        ws.onclose = () => {
+          overlay.firstElementChild.textContent =
+            connectAttempts > 3
+              ? "Disconnected. Reload to start a new game."
+              : "Reconnecting…";
+          overlay.style.display = "flex";
+          if (connectAttempts <= 3) {
+            connectAttempts += 1;
+            setTimeout(connect, 1000);
+          }
+        };
+
+        ws.onerror = () => { /* close handler will fire */ };
+      }
+      connect();
+
+      // Forward keyboard events to the server.
+      function send(type, key, unicode) {
+        if (!ws || ws.readyState !== 1) return;
+        ws.send(JSON.stringify({ type, key, unicode: unicode || "" }));
+      }
+
+      // Prevent the browser from acting on our game keys (e.g. arrow keys
+      // scrolling the page, Escape leaving full-screen, etc.).
+      const SWALLOWED = new Set([
+        "w", "a", "s", "d", "e",
+        "1", "2", "3",
+        "Enter", "Escape", "Backspace",
+        "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+        "PageUp", "PageDown", " "
+      ]);
+      function shouldSwallow(key) {
+        if (SWALLOWED.has(key)) return true;
+        if (key.length === 1 && key.match(/[a-zA-Z0-9 .,?!@:;\-_'"`/\\]/)) return true;
+        return false;
+      }
+
+      window.addEventListener("keydown", (ev) => {
+        if (shouldSwallow(ev.key)) ev.preventDefault();
+        // Don't repeat keydown on auto-repeat — pygame relies on key-pressed state, not repeat events
+        if (ev.repeat) return;
+        send("keydown", ev.key);
+      });
+
+      window.addEventListener("keyup", (ev) => {
+        if (shouldSwallow(ev.key)) ev.preventDefault();
+        send("keyup", ev.key);
+      });
+    })();
+  </script>
+</body>
+</html>

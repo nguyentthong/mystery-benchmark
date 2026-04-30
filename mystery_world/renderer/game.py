@@ -111,14 +111,28 @@ class MysteryGame:
         env: MysteryEnvironment,
         window_title: str = "MysteryArena",
         sprites: SpriteLoader | None = None,
+        headless: bool = False,
     ) -> None:
+        """
+        headless=True: render to an off-screen Surface (no display window).
+        Use this when the game runs server-side and frames are streamed
+        elsewhere (e.g. WebSocket → browser canvas). Each headless instance
+        carries its own event queue and pressed-key state, so multiple
+        instances can coexist in one process.
+        """
         self.env = env
         self.state = env.state
         self.window_title = window_title
+        self.headless = headless
+
+        # Per-instance input state (used in headless mode; ignored otherwise)
+        self._pending_events: list[pygame.event.Event] = []
+        self._pressed_keys: set[int] = set()
 
         # Pygame must be initialised before EmojiSprites loads its font
         pygame.init()
-        pygame.display.set_caption(window_title)
+        if not headless:
+            pygame.display.set_caption(window_title)
 
         # Default sprite loader: emoji icons (real icons, not geometric shapes).
         # Falls back to procedural primitives if Noto Color Emoji isn't found.
@@ -157,7 +171,11 @@ class MysteryGame:
         room_h_px = self.current_layout.height * TILE_PX
         self.win_w = room_w_px + SIDEBAR_W
         self.win_h = TOPBAR_H + room_h_px + STATUS_H
-        self.screen = pygame.display.set_mode((self.win_w, self.win_h))
+        if headless:
+            # Off-screen surface — no window, multiple instances OK in one process.
+            self.screen = pygame.Surface((self.win_w, self.win_h))
+        else:
+            self.screen = pygame.display.set_mode((self.win_w, self.win_h))
         self.clock = pygame.time.Clock()
         self.font_sm = pygame.font.SysFont("dejavusansmono,monospace", 13)
         self.font_md = pygame.font.SysFont("dejavusansmono,monospace", 15)
@@ -1080,13 +1098,55 @@ class MysteryGame:
     # run_async() can drive it. Returns True while the game is still alive.
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Headless input API — server uses these to feed user input into the
+    # game from a WebSocket. Mirror what pygame would normally surface.
+    # ------------------------------------------------------------------
+
+    def inject_key_down(self, key: int, unicode: str = "") -> None:
+        """Queue a synthetic KEYDOWN and mark the key held."""
+        self._pending_events.append(
+            pygame.event.Event(pygame.KEYDOWN, {"key": key, "unicode": unicode, "mod": 0})
+        )
+        self._pressed_keys.add(key)
+
+    def inject_key_up(self, key: int) -> None:
+        """Queue a synthetic KEYUP and mark the key released."""
+        self._pending_events.append(
+            pygame.event.Event(pygame.KEYUP, {"key": key, "mod": 0})
+        )
+        self._pressed_keys.discard(key)
+
+    def _drain_events(self) -> list[pygame.event.Event]:
+        if self.headless:
+            events = self._pending_events
+            self._pending_events = []
+            return events
+        return list(pygame.event.get())
+
+    def _is_key_held(self, key: int) -> bool:
+        if self.headless:
+            return key in self._pressed_keys
+        return bool(pygame.key.get_pressed()[key])
+
+    def get_frame_png(self) -> bytes:
+        """Serialise the current screen Surface as PNG bytes (headless servers)."""
+        import io
+        from PIL import Image
+        # pygame.surfarray.array3d returns (W, H, 3); transpose for PIL
+        import numpy as np
+        arr = pygame.surfarray.array3d(self.screen).transpose(1, 0, 2)
+        buf = io.BytesIO()
+        Image.fromarray(arr.astype(np.uint8)).save(buf, format="PNG")
+        return buf.getvalue()
+
     def _tick(self) -> bool:
         if not self.running:
             return False
         dt = self.clock.tick(60) / 1000.0
 
         # ---- events ----
-        for event in pygame.event.get():
+        for event in self._drain_events():
             if event.type == pygame.QUIT:
                 self.running = False
                 continue
@@ -1133,15 +1193,14 @@ class MysteryGame:
             and not self.env.is_solved
             and self.env.budget_remaining > 0
         ):
-            keys = pygame.key.get_pressed()
             vx = vy = 0.0
-            if keys[pygame.K_w]:
+            if self._is_key_held(pygame.K_w):
                 vy -= 1
-            if keys[pygame.K_s]:
+            if self._is_key_held(pygame.K_s):
                 vy += 1
-            if keys[pygame.K_a]:
+            if self._is_key_held(pygame.K_a):
                 vx -= 1
-            if keys[pygame.K_d]:
+            if self._is_key_held(pygame.K_d):
                 vx += 1
             if vx or vy:
                 norm = (vx * vx + vy * vy) ** 0.5
@@ -1161,7 +1220,8 @@ class MysteryGame:
         self._draw_menu()
         self._draw_modal()
         self._draw_endscreen()
-        pygame.display.flip()
+        if not self.headless:
+            pygame.display.flip()
         return True
 
     def run(self) -> None:
