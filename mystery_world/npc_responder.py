@@ -248,18 +248,28 @@ class NPCResponder:
         self._ensure_client()
         system = build_npc_system_prompt(char, state)
         messages = list(history) + [{"role": "user", "content": question}]
+
+        # OpenAI rejects vLLM-only extras (`chat_template_kwargs`, etc.).
+        # Detect endpoint kind and only send the extras vLLM expects.
+        is_openai = self.base_url is None or "openai.com" in (self.base_url or "")
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": [{"role": "system", "content": system}] + messages,
+            "max_tokens": 512,
+            "temperature": 0.7,
+        }
+        if is_openai:
+            # OpenAI supports `seed` as a top-level kwarg.
+            kwargs["seed"] = self.seed
+        else:
+            # vLLM: pass seed + thinking-mode toggle through extra_body.
+            kwargs["extra_body"] = {
+                "seed": self.seed,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+
         try:
-            resp = self._client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "system", "content": system}] + messages,
-                max_tokens=512,
-                temperature=0.7,
-                extra_body={
-                    "seed": self.seed,
-                    # Disable chain-of-thought for Qwen3 thinking models
-                    "chat_template_kwargs": {"enable_thinking": False},
-                },
-            )
+            resp = self._client.chat.completions.create(**kwargs)
             raw = resp.choices[0].message.content or ""
             return _strip_thinking(raw).strip()
         except Exception as exc:
