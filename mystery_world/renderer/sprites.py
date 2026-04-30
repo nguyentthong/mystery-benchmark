@@ -575,6 +575,50 @@ class ProceduralSprites(SpriteLoader):
         pygame.draw.circle(surface, (60, 60, 70), (cx, cy - s // 3), s // 8, 2)
 
     @staticmethod
+    def _draw_cigar(surface, rect):
+        """Cigar stub — brown cylinder with red ember and curling smoke."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.55)
+        # Cigar body (horizontal cylinder)
+        body = pygame.Rect(cx - s // 2, cy + s // 8, s, s // 5)
+        pygame.draw.rect(surface, (110, 70, 35), body, border_radius=2)
+        pygame.draw.rect(surface, (40, 25, 10), body, 1, border_radius=2)
+        # Ash band near right end
+        pygame.draw.rect(surface, (200, 200, 200),
+                         (body.right - s // 4, body.y + 1, s // 6, body.h - 2))
+        # Lit ember
+        pygame.draw.circle(surface, (240, 100, 40),
+                           (body.right - 2, body.y + body.h // 2), 3)
+        # Smoke wisps curling up
+        from math import sin, radians
+        for i, dy in enumerate([-s // 4, -s // 2, -3 * s // 4]):
+            wave = int(sin(radians(i * 60)) * 4)
+            pygame.draw.circle(surface, (200, 200, 200, 200),
+                               (body.right - 2 + wave, body.y + dy), 3)
+
+    @staticmethod
+    def _draw_tray(surface, rect):
+        """Serving tray — flat oval with handle notches at the ends."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.7)
+        # Tray oval
+        tray = pygame.Rect(cx - s // 2, cy - s // 4, s, s // 2)
+        pygame.draw.ellipse(surface, (200, 170, 110), tray)
+        pygame.draw.ellipse(surface, (40, 25, 10), tray, 2)
+        # Handle indents (left and right)
+        pygame.draw.arc(surface, (40, 25, 10),
+                        (tray.x - 4, cy - 6, 12, 12), 1.57, 4.71, 2)
+        pygame.draw.arc(surface, (40, 25, 10),
+                        (tray.right - 8, cy - 6, 12, 12), 4.71, 7.85, 2)
+        # Two small "items" on the tray (suggests tableware)
+        pygame.draw.circle(surface, (220, 220, 215), (cx - s // 5, cy), 4)
+        pygame.draw.circle(surface, (40, 25, 10), (cx - s // 5, cy), 4, 1)
+        pygame.draw.rect(surface, (220, 200, 80),
+                         (cx + s // 8, cy - 3, 6, 6))
+        pygame.draw.rect(surface, (40, 25, 10),
+                         (cx + s // 8, cy - 3, 6, 6), 1)
+
+    @staticmethod
     def _draw_window(surface, rect):
         """Window frame with cross-mullions."""
         cx, cy = rect.center
@@ -655,6 +699,8 @@ class ProceduralSprites(SpriteLoader):
         (("trunk", "chest"),                            "_draw_trunk"),
         (("window", "ledge"),                           "_draw_window"),
         (("rack", "stand"),                             "_draw_coat_rack"),
+        (("cigar", "cigarette", "stub"),                "_draw_cigar"),
+        (("tray", "platter"),                           "_draw_tray"),
     ]
 
     # ---- status badges -----------------------------------------------

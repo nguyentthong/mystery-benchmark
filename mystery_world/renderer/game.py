@@ -472,7 +472,10 @@ class MysteryGame:
     def _try_move_player(self, dx: float, dy: float) -> None:
         """Move axis-by-axis with AABB-vs-tile collision against walls,
         objects, and characters."""
-        radius = TILE_PX * 0.30  # avatar half-extent
+        # Slightly tighter than the visual radius (TILE_PX/3 ~= 0.33) so the
+        # avatar can squeeze through 1-tile doorways without snagging on
+        # adjacent walls when slightly off-centre.
+        radius = TILE_PX * 0.22
 
         def blocked_at(px: float, py: float) -> bool:
             # Player tile (centre)
@@ -502,12 +505,20 @@ class MysteryGame:
         if not blocked_at(self.player_px, new_y):
             self.player_py = new_y
 
-        # Walking onto a door tile = auto-trigger MOVE.
-        tx = int(self.player_px // TILE_PX)
-        ty = int(self.player_py // TILE_PX)
-        adj = self.current_layout.door_at(tx, ty)
-        if adj is not None:
-            self._trigger_move(adj)
+        # Door MOVE trigger: as soon as ANY part of the avatar overlaps a
+        # door tile (centre tile or any AABB corner), step through. Lets
+        # players brush against a doorway without needing perfect alignment.
+        for tx, ty in {
+            (int(self.player_px // TILE_PX), int(self.player_py // TILE_PX)),
+            (int((self.player_px - radius) // TILE_PX), int(self.player_py // TILE_PX)),
+            (int((self.player_px + radius) // TILE_PX), int(self.player_py // TILE_PX)),
+            (int(self.player_px // TILE_PX), int((self.player_py - radius) // TILE_PX)),
+            (int(self.player_px // TILE_PX), int((self.player_py + radius) // TILE_PX)),
+        }:
+            adj = self.current_layout.door_at(tx, ty)
+            if adj is not None:
+                self._trigger_move(adj)
+                return
 
     # ------------------------------------------------------------------
     # Drawing — coordinates
