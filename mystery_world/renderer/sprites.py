@@ -111,31 +111,23 @@ class ProceduralSprites(SpriteLoader):
     ) -> None:
         if evidence_state in (EvidenceState.HIDDEN, EvidenceState.DESTROYED):
             return
-        # Pick a pictograph that matches the object's name where possible.
-        # Weapon/evidence flags override only when the name doesn't match
-        # something more specific (so a "candelabra" used as a weapon still
-        # looks like a candelabra, with a weapon-edge tint).
+        # Pick the pictograph that matches the object's name. No status
+        # badges — the player figures out what's interactable by examining.
         draw_fn = self._pick_object_icon(obj.name)
         draw_fn(surface, rect)
-        # Status overlays — small badges in the top-right of the tile
-        if obj.is_weapon:
-            self._badge_weapon(surface, rect)
-        if obj.evidence_id and discovered:
-            self._badge_examined(surface, rect)
-        elif obj.evidence_id:
-            self._badge_clue(surface, rect)
 
     # ---- icon picker --------------------------------------------------
 
     @classmethod
     def _pick_object_icon(cls, name: str):
         """Match the object's name against a small library; fall back to
-        a generic prop. Returns a `(surface, rect) -> None` draw callback."""
+        a generic prop. Uses word-boundary matching so e.g. "urn" doesn't
+        match inside "b-urn-ed" or "overt-urn-ed"."""
+        import re
         n = (name or "").lower()
-        # Order matters — longer, more specific keywords first
         for keys, fn in cls._ICON_LIBRARY:
             for k in keys:
-                if k in n:
+                if re.search(rf"\b{re.escape(k)}\b", n):
                     return fn
         return cls._draw_chair
 
@@ -467,6 +459,99 @@ class ProceduralSprites(SpriteLoader):
                          (body.x + 3, body.bottom - s // 5 - 4, 4, 4))
 
     @staticmethod
+    def _draw_table(surface, rect):
+        """Side table / writing desk — flat top with two legs."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.6)
+        # Tabletop
+        top = pygame.Rect(cx - s // 2, cy - s // 8, s, s // 6)
+        pygame.draw.rect(surface, (140, 90, 50), top, border_radius=2)
+        pygame.draw.rect(surface, (40, 25, 10), top, 2, border_radius=2)
+        # Legs
+        for lx in (cx - s // 2 + 3, cx + s // 2 - 7):
+            leg = pygame.Rect(lx, top.bottom, 4, s // 2)
+            pygame.draw.rect(surface, (90, 60, 30), leg)
+            pygame.draw.rect(surface, (40, 25, 10), leg, 1)
+        # A subtle drawer line on the front of the top (suggests "desk")
+        pygame.draw.line(surface, (40, 25, 10),
+                         (top.x + 4, top.y + top.h // 2),
+                         (top.right - 4, top.y + top.h // 2), 1)
+
+    @staticmethod
+    def _draw_spectacles(surface, rect):
+        """Pair of round spectacles connected by a bridge."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.55)
+        r = s // 4
+        # Two lenses
+        pygame.draw.circle(surface, (200, 220, 230), (cx - r, cy), r)
+        pygame.draw.circle(surface, (200, 220, 230), (cx + r, cy), r)
+        pygame.draw.circle(surface, (40, 30, 25), (cx - r, cy), r, 2)
+        pygame.draw.circle(surface, (40, 30, 25), (cx + r, cy), r, 2)
+        # Bridge between them
+        pygame.draw.line(surface, (40, 30, 25), (cx - r + 2, cy), (cx + r - 2, cy), 2)
+        # Crack across the right lens to suggest "broken"
+        pygame.draw.line(surface, (40, 30, 25),
+                         (cx + r // 2, cy - r // 2), (cx + 2 * r - 4, cy + r // 2), 1)
+
+    @staticmethod
+    def _draw_coat_rack(surface, rect):
+        """Vertical post with hook arms — coat rack / hat stand."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.65)
+        # Post
+        pygame.draw.line(surface, (90, 60, 30), (cx, cy - s // 2), (cx, cy + s // 2), 4)
+        # Hooks (top crossbar + two angled hooks)
+        pygame.draw.line(surface, (90, 60, 30),
+                         (cx - s // 4, cy - s // 2 + 2),
+                         (cx + s // 4, cy - s // 2 + 2), 3)
+        for hx in (cx - s // 4, cx + s // 4):
+            pygame.draw.line(surface, (90, 60, 30),
+                             (hx, cy - s // 2 + 2), (hx, cy - s // 2 + 8), 3)
+        # Base (small triangle)
+        pygame.draw.polygon(surface, (90, 60, 30), [
+            (cx - s // 5, cy + s // 2),
+            (cx + s // 5, cy + s // 2),
+            (cx, cy + s // 2 - s // 6),
+        ])
+
+    @staticmethod
+    def _draw_trunk(surface, rect):
+        """Storage trunk / chest with a curved lid."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.65)
+        # Body
+        body = pygame.Rect(cx - s // 2, cy - s // 6, s, s // 2)
+        pygame.draw.rect(surface, (110, 70, 35), body)
+        pygame.draw.rect(surface, (40, 25, 10), body, 2)
+        # Curved lid (semi-ellipse)
+        lid = pygame.Rect(cx - s // 2, cy - s // 2, s, s // 3)
+        pygame.draw.ellipse(surface, (130, 90, 50), lid)
+        pygame.draw.arc(surface, (40, 25, 10), lid, 0, 3.14159, 2)
+        # Strap
+        pygame.draw.rect(surface, (60, 40, 20), (cx - 3, lid.y, 6, body.bottom - lid.y))
+        # Lock plate
+        pygame.draw.rect(surface, (220, 200, 80), (cx - 5, body.y - 2, 10, 6))
+        pygame.draw.rect(surface, (40, 25, 10), (cx - 5, body.y - 2, 10, 6), 1)
+
+    @staticmethod
+    def _draw_window(surface, rect):
+        """Window frame with cross-mullions."""
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.65)
+        body = pygame.Rect(cx - s // 2, cy - s // 2, s, s)
+        # Frame
+        pygame.draw.rect(surface, (180, 200, 220), body)
+        pygame.draw.rect(surface, (60, 50, 40), body, 3)
+        # Cross mullions
+        pygame.draw.line(surface, (60, 50, 40), (cx, body.y), (cx, body.bottom), 2)
+        pygame.draw.line(surface, (60, 50, 40), (body.x, cy), (body.right, cy), 2)
+        # Subtle highlight on top-left pane
+        pygame.draw.line(surface, (240, 250, 255),
+                         (body.x + 4, body.y + 4),
+                         (cx - 3, body.y + 4), 1)
+
+    @staticmethod
     def _draw_flower(surface, rect):
         """Wilted bouquet — drooping flower silhouette."""
         cx, cy = rect.center
@@ -488,9 +573,9 @@ class ProceduralSprites(SpriteLoader):
 
     # Library: keys to look for (lowercased) -> draw callback.
     # Long, specific keys first so e.g. "fireplace mantel" matches fireplace
-    # before "mantel" / chair fallback.
+    # before generic words like "mantel" or "table".
     _ICON_LIBRARY = [
-        (("fireplace",),                   _draw_fireplace),
+        (("fireplace", "hearth"),          _draw_fireplace),
         (("radiator",),                    _draw_radiator),
         (("chess",),                       _draw_chess),
         (("basket",),                      _draw_basket),
@@ -503,14 +588,20 @@ class ProceduralSprites(SpriteLoader):
         (("clock", "watch", "timepiece"),  _draw_clock),
         (("candle", "candelabra", "lamp", "lantern"), _draw_candle),
         (("book", "diary", "journal", "ledger", "tome", "shelf"), _draw_book),
-        (("vase", "urn", "pot"),           _draw_vase),
+        (("spectacles", "eyeglasses", "monocle"), _draw_spectacles),
+        (("vase", "pot"),                  _draw_vase),
         (("key",),                         _draw_key),
-        (("letter", "note", "envelope", "telegram", "memo", "receipt", "ticket"), _draw_letter),
+        (("letter", "note", "envelope", "telegram", "memo",
+          "receipt", "ticket"),            _draw_letter),
         (("umbrella", "parasol"),          _draw_umbrella),
         (("bottle", "decanter", "flask", "vial"), _draw_bottle),
         (("pistol", "revolver", "rifle", "shotgun", "firearm"), _draw_gun),
         (("rug", "carpet", "tapestry", "curtain"), _draw_rug),
         (("painting", "portrait", "canvas", "frame"), _draw_painting),
+        (("desk", "table"),                _draw_table),
+        (("trunk", "chest"),               _draw_trunk),
+        (("window", "ledge"),              _draw_window),
+        (("rack", "stand"),                _draw_coat_rack),
     ]
 
     # ---- status badges -----------------------------------------------

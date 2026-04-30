@@ -122,17 +122,56 @@ def build_room_layout(location: Location) -> RoomLayout:
     ]
     rng.shuffle(free)
 
+    # Spacing: every entity placed should be at least MIN_SPACING tiles
+    # (Chebyshev / king's move) away from the previous one, so labels and
+    # sprites never visually collide. We pick the first candidate tile that
+    # is far enough from everything already placed; if no candidate qualifies,
+    # we fall back to the most-distant tile we can find.
+    MIN_SPACING = 3
+    # Seed placed[] with the spawn so no entity ends up within MIN_SPACING
+    # of where the player appears — keeps the avatar's "** YOU **" label
+    # from clipping over a prop's label on game start.
+    placed: list[tuple[int, int]] = [default_spawn]
+
+    def _far_enough(tile: tuple[int, int]) -> bool:
+        return all(
+            max(abs(tile[0] - p[0]), abs(tile[1] - p[1])) >= MIN_SPACING
+            for p in placed
+        )
+
+    def _take_one() -> tuple[int, int] | None:
+        if not free:
+            return None
+        # First pass: prefer tiles that satisfy spacing
+        for i, t in enumerate(free):
+            if _far_enough(t):
+                free.pop(i)
+                placed.append(t)
+                return t
+        # Fallback: take the tile furthest from the closest existing placement
+        if placed:
+            def _min_dist(t):
+                return min(max(abs(t[0] - p[0]), abs(t[1] - p[1])) for p in placed)
+            best_idx = max(range(len(free)), key=lambda i: _min_dist(free[i]))
+        else:
+            best_idx = 0
+        t = free.pop(best_idx)
+        placed.append(t)
+        return t
+
     objects: dict[str, tuple[int, int]] = {}
     for oid in location.objects_here:
-        if not free:
+        t = _take_one()
+        if t is None:
             break
-        objects[oid] = free.pop()
+        objects[oid] = t
 
     characters: dict[str, tuple[int, int]] = {}
     for cid in location.characters_here:
-        if not free:
+        t = _take_one()
+        if t is None:
             break
-        characters[cid] = free.pop()
+        characters[cid] = t
 
     return RoomLayout(
         location_id=location.id,

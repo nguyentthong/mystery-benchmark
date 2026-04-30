@@ -293,16 +293,39 @@ class MysteryGame:
             for y in range(2, layout.height - 2)
             if layout.tiles[x][y] == Tile.FLOOR and (x, y) not in used
         ]
-        # Place any new objects/characters that arrived
+        # Place any new objects/characters that arrived. Keep them at least
+        # 3 tiles apart from each other and from existing entities so labels
+        # don't collide.
         import random
         rng = random.Random(f"refresh::{layout.location_id}::{self.state.current_step}")
         rng.shuffle(free)
+        MIN_SPACING = 3
+        placed = list(used)
+
+        def _take_one() -> tuple[int, int] | None:
+            if not free:
+                return None
+            for i, t in enumerate(free):
+                if all(max(abs(t[0]-p[0]), abs(t[1]-p[1])) >= MIN_SPACING for p in placed):
+                    free.pop(i); placed.append(t); return t
+            # No tile satisfies spacing — pick the most-distant one anyway
+            best = max(range(len(free)),
+                       key=lambda i: min((max(abs(free[i][0]-p[0]), abs(free[i][1]-p[1]))
+                                          for p in placed), default=99))
+            t = free.pop(best); placed.append(t); return t
+
         for oid in loc.objects_here:
-            if oid not in layout.objects and free:
-                layout.objects[oid] = free.pop()
+            if oid not in layout.objects:
+                t = _take_one()
+                if t is None:
+                    break
+                layout.objects[oid] = t
         for cid in loc.characters_here:
-            if cid not in layout.characters and free:
-                layout.characters[cid] = free.pop()
+            if cid not in layout.characters:
+                t = _take_one()
+                if t is None:
+                    break
+                layout.characters[cid] = t
 
     def _enter_room(self, new_loc_id: str, from_loc_id: str) -> None:
         self.current_layout = self._layout_for(new_loc_id)

@@ -87,12 +87,32 @@ def _layout_for(env: MysteryEnvironment, location_id: str) -> RoomLayout:
     import random
     rng = random.Random(f"obs::{location_id}::{env.state.current_step}")
     rng.shuffle(free)
+    MIN_SPACING = 3
+    placed = list(used)
+
+    def _take_one():
+        if not free:
+            return None
+        for i, t in enumerate(free):
+            if all(max(abs(t[0]-p[0]), abs(t[1]-p[1])) >= MIN_SPACING for p in placed):
+                free.pop(i); placed.append(t); return t
+        best = max(range(len(free)),
+                   key=lambda i: min((max(abs(free[i][0]-p[0]), abs(free[i][1]-p[1]))
+                                      for p in placed), default=99))
+        t = free.pop(best); placed.append(t); return t
+
     for oid in loc.objects_here:
-        if oid not in layout.objects and free:
-            layout.objects[oid] = free.pop()
+        if oid not in layout.objects:
+            t = _take_one()
+            if t is None:
+                break
+            layout.objects[oid] = t
     for cid in loc.characters_here:
-        if cid not in layout.characters and free:
-            layout.characters[cid] = free.pop()
+        if cid not in layout.characters:
+            t = _take_one()
+            if t is None:
+                break
+            layout.characters[cid] = t
     return layout
 
 
