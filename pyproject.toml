@@ -6,8 +6,11 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "anthropic>=0.94.0",
+    "networkx>=3.4",
     "numpy>=2.2.6",
     "openai>=2.31.0",
+    "pillow>=11.0.0",
+    "pygame>=2.6.0",
     "pyyaml>=6.0.3",
     "structlog>=25.5.0",
 ]
