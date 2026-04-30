@@ -111,14 +111,234 @@ class ProceduralSprites(SpriteLoader):
     ) -> None:
         if evidence_state in (EvidenceState.HIDDEN, EvidenceState.DESTROYED):
             return
+        # Pick a pictograph that matches the object's name where possible.
+        # Weapon/evidence flags override only when the name doesn't match
+        # something more specific (so a "candelabra" used as a weapon still
+        # looks like a candelabra, with a weapon-edge tint).
+        draw_fn = self._pick_object_icon(obj.name)
+        draw_fn(surface, rect)
+        # Status overlays — small badges in the top-right of the tile
         if obj.is_weapon:
-            self._draw_weapon(surface, rect)
-        elif obj.evidence_id and discovered:
-            self._draw_magnifier(surface, rect)
+            self._badge_weapon(surface, rect)
+        if obj.evidence_id and discovered:
+            self._badge_examined(surface, rect)
         elif obj.evidence_id:
-            self._draw_evidence_box(surface, rect)
-        else:
-            self._draw_chair(surface, rect)
+            self._badge_clue(surface, rect)
+
+    # ---- icon picker --------------------------------------------------
+
+    @classmethod
+    def _pick_object_icon(cls, name: str):
+        """Match the object's name against a small library; fall back to
+        a generic prop. Returns a `(surface, rect) -> None` draw callback."""
+        n = (name or "").lower()
+        # Order matters — longer, more specific keywords first
+        for keys, fn in cls._ICON_LIBRARY:
+            for k in keys:
+                if k in n:
+                    return fn
+        return cls._draw_chair
+
+    # ---- pictograph primitives ---------------------------------------
+
+    @staticmethod
+    def _draw_mirror(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.6)
+        body = pygame.Rect(cx - s // 3, cy - s // 2, 2 * s // 3, s)
+        pygame.draw.rect(surface, (200, 220, 240), body, border_radius=int(s * 0.3))
+        pygame.draw.rect(surface, (40, 30, 20), body, 2, border_radius=int(s * 0.3))
+        # Shimmer
+        pygame.draw.line(surface, (255, 255, 255), (body.x + 4, body.y + 6), (body.x + 4, body.y + s // 3), 2)
+
+    @staticmethod
+    def _draw_clock(surface, rect):
+        cx, cy = rect.center
+        r = int(min(rect.w, rect.h) * 0.32)
+        pygame.draw.circle(surface, (240, 230, 210), (cx, cy), r)
+        pygame.draw.circle(surface, (40, 30, 20), (cx, cy), r, 2)
+        pygame.draw.line(surface, (40, 30, 20), (cx, cy), (cx, cy - r + 4), 2)   # 12 o'clock
+        pygame.draw.line(surface, (40, 30, 20), (cx, cy), (cx + r // 2, cy), 2)  # 3 o'clock-ish
+        pygame.draw.circle(surface, (40, 30, 20), (cx, cy), 2)
+
+    @staticmethod
+    def _draw_candle(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.6)
+        # Candle body
+        body = pygame.Rect(cx - s // 6, cy - s // 4, s // 3, s // 2)
+        pygame.draw.rect(surface, (240, 230, 200), body)
+        pygame.draw.rect(surface, (40, 30, 20), body, 2)
+        # Wick
+        pygame.draw.line(surface, (40, 30, 20), (cx, cy - s // 4), (cx, cy - s // 4 - 4), 2)
+        # Flame
+        pygame.draw.polygon(surface, (240, 160, 60), [
+            (cx, cy - s // 2 - 2), (cx - 4, cy - s // 4 - 2), (cx + 4, cy - s // 4 - 2),
+        ])
+
+    @staticmethod
+    def _draw_book(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.6)
+        body = pygame.Rect(cx - s // 2, cy - s // 3, s, 2 * s // 3)
+        pygame.draw.rect(surface, (160, 60, 60), body, border_radius=2)
+        pygame.draw.rect(surface, (40, 20, 20), body, 2, border_radius=2)
+        # Pages: vertical lines on the right edge
+        for dy in range(-s // 4, s // 4, 4):
+            pygame.draw.line(surface, (240, 230, 200), (body.right - 4, cy + dy), (body.right - 1, cy + dy), 1)
+        # Spine
+        pygame.draw.line(surface, (240, 200, 110), (cx, body.y + 4), (cx, body.bottom - 4), 1)
+
+    @staticmethod
+    def _draw_vase(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.55)
+        # Vase silhouette: trapezoid with bulge
+        pts = [
+            (cx - s // 4, cy - s // 2),
+            (cx + s // 4, cy - s // 2),
+            (cx + s // 3, cy),
+            (cx + s // 4, cy + s // 2),
+            (cx - s // 4, cy + s // 2),
+            (cx - s // 3, cy),
+        ]
+        pygame.draw.polygon(surface, (120, 150, 170), pts)
+        pygame.draw.polygon(surface, (40, 50, 60), pts, 2)
+        # Floral hint
+        pygame.draw.circle(surface, (220, 100, 100), (cx, cy - s // 2 - 4), 4)
+        pygame.draw.circle(surface, (220, 200, 100), (cx - 6, cy - s // 2 - 2), 3)
+
+    @staticmethod
+    def _draw_key(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.6)
+        # Bow
+        pygame.draw.circle(surface, (220, 180, 80), (cx - s // 4, cy), s // 6)
+        pygame.draw.circle(surface, (40, 30, 10), (cx - s // 4, cy), s // 6, 2)
+        # Shaft
+        pygame.draw.rect(surface, (220, 180, 80), (cx - s // 4 + s // 6, cy - 3, s // 2, 6))
+        pygame.draw.rect(surface, (40, 30, 10), (cx - s // 4 + s // 6, cy - 3, s // 2, 6), 1)
+        # Teeth
+        pygame.draw.rect(surface, (220, 180, 80), (cx + s // 4 - 4, cy + 3, 6, 4))
+
+    @staticmethod
+    def _draw_letter(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.6)
+        body = pygame.Rect(cx - s // 2, cy - s // 3, s, 2 * s // 3)
+        pygame.draw.rect(surface, (240, 230, 200), body)
+        pygame.draw.rect(surface, (40, 30, 20), body, 2)
+        # Flap diagonals
+        pygame.draw.line(surface, (40, 30, 20), body.topleft, body.center, 2)
+        pygame.draw.line(surface, (40, 30, 20), body.topright, body.center, 2)
+
+    @staticmethod
+    def _draw_umbrella(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.6)
+        # Canopy: half-circle
+        canopy = pygame.Rect(cx - s // 2, cy - s // 2, s, s)
+        pygame.draw.arc(surface, (60, 100, 140), canopy, 0, 3.14159, max(2, s // 4))
+        pygame.draw.line(surface, (40, 50, 60), (cx, cy), (cx, cy + s // 2), 2)
+        # Handle hook
+        pygame.draw.arc(surface, (40, 50, 60), (cx - 8, cy + s // 2 - 4, 12, 8), 3.14159, 6.28318, 2)
+
+    @staticmethod
+    def _draw_bottle(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.55)
+        # Neck
+        pygame.draw.rect(surface, (90, 130, 90), (cx - 3, cy - s // 2, 6, s // 4))
+        # Body
+        body = pygame.Rect(cx - s // 3, cy - s // 4, 2 * s // 3, 3 * s // 4)
+        pygame.draw.rect(surface, (90, 130, 90), body, border_radius=4)
+        pygame.draw.rect(surface, (20, 40, 20), body, 2, border_radius=4)
+        # Label
+        pygame.draw.rect(surface, (240, 230, 200), (body.x + 4, cy + 4, body.w - 8, 8))
+
+    @staticmethod
+    def _draw_gun(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.55)
+        # Barrel
+        pygame.draw.rect(surface, (60, 60, 70), (cx - s // 2, cy - 4, s, 8))
+        pygame.draw.rect(surface, (20, 20, 30), (cx - s // 2, cy - 4, s, 8), 1)
+        # Grip
+        pygame.draw.polygon(surface, (90, 60, 40), [
+            (cx, cy + 4), (cx + s // 5, cy + 4),
+            (cx + s // 4, cy + s // 3), (cx - s // 12, cy + s // 3),
+        ])
+
+    @staticmethod
+    def _draw_rug(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.7)
+        body = pygame.Rect(cx - s // 2, cy - s // 4, s, s // 2)
+        pygame.draw.rect(surface, (140, 60, 60), body, border_radius=3)
+        pygame.draw.rect(surface, (40, 20, 20), body, 2, border_radius=3)
+        # Pattern stripes
+        for y in (cy - s // 8, cy, cy + s // 8):
+            pygame.draw.line(surface, (240, 200, 110), (body.x + 4, y), (body.right - 4, y), 1)
+
+    @staticmethod
+    def _draw_painting(surface, rect):
+        cx, cy = rect.center
+        s = int(min(rect.w, rect.h) * 0.65)
+        body = pygame.Rect(cx - s // 2, cy - s // 2, s, s)
+        pygame.draw.rect(surface, (240, 200, 110), body)
+        pygame.draw.rect(surface, (60, 40, 20), body, 3)
+        # Inner image hint: an arc + a triangle (mountains/sun)
+        pygame.draw.polygon(surface, (90, 130, 90), [
+            (body.x + 4, body.bottom - 4),
+            (cx - 4, body.y + 8),
+            (cx + s // 6, body.bottom - 4),
+        ])
+        pygame.draw.circle(surface, (240, 160, 60), (body.right - 8, body.y + 8), 4)
+
+    # Library: keys to look for (lowercased) -> draw callback.
+    # Long, specific keys first.
+    _ICON_LIBRARY = [
+        (("mirror",),                      _draw_mirror),
+        (("clock", "watch", "timepiece"),  _draw_clock),
+        (("candle", "candelabra", "lamp"), _draw_candle),
+        (("book", "diary", "journal", "ledger", "tome"), _draw_book),
+        (("vase", "urn", "pot"),           _draw_vase),
+        (("key",),                         _draw_key),
+        (("letter", "note", "envelope", "telegram", "memo"), _draw_letter),
+        (("umbrella", "parasol"),          _draw_umbrella),
+        (("bottle", "decanter", "flask", "vial"), _draw_bottle),
+        (("pistol", "revolver", "rifle", "shotgun", "firearm"), _draw_gun),
+        (("rug", "carpet", "tapestry"),    _draw_rug),
+        (("painting", "portrait", "canvas", "frame"), _draw_painting),
+    ]
+
+    # ---- status badges -----------------------------------------------
+
+    @staticmethod
+    def _badge_weapon(surface, rect):
+        # Red diamond in top-right corner
+        x, y = rect.right - 10, rect.top + 6
+        pts = [(x, y - 5), (x + 5, y), (x, y + 5), (x - 5, y)]
+        pygame.draw.polygon(surface, (220, 80, 80), pts)
+        pygame.draw.polygon(surface, (40, 20, 20), pts, 1)
+
+    @staticmethod
+    def _badge_clue(surface, rect):
+        # Yellow "!" in top-right corner (interactable, undiscovered)
+        x, y = rect.right - 8, rect.top + 6
+        pygame.draw.circle(surface, (240, 200, 80), (x, y), 7)
+        pygame.draw.circle(surface, (60, 40, 10), (x, y), 7, 1)
+        pygame.draw.line(surface, (60, 40, 10), (x, y - 3), (x, y + 1), 2)
+        pygame.draw.circle(surface, (60, 40, 10), (x, y + 3), 1)
+
+    @staticmethod
+    def _badge_examined(surface, rect):
+        # Green check in top-right (already discovered)
+        x, y = rect.right - 8, rect.top + 6
+        pygame.draw.circle(surface, (110, 200, 130), (x, y), 7)
+        pygame.draw.circle(surface, (20, 60, 30), (x, y), 7, 1)
+        pygame.draw.line(surface, (20, 60, 30), (x - 3, y), (x - 1, y + 2), 2)
+        pygame.draw.line(surface, (20, 60, 30), (x - 1, y + 2), (x + 3, y - 2), 2)
 
     # ---- pictographs ------------------------------------------------
 

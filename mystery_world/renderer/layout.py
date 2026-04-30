@@ -103,12 +103,22 @@ def build_room_layout(location: Location) -> RoomLayout:
         ox, oy = _SPAWN_OFFSET[side]
         spawn_from[adj_id] = (dx + ox, dy + oy)
 
+    # Reserve the default spawn (room centre) and the four tiles cardinally
+    # adjacent to it so the player isn't surrounded by props on entry.
+    default_spawn = (ROOM_W // 2, ROOM_H // 2)
+    reserved = {
+        default_spawn,
+        (default_spawn[0] + 1, default_spawn[1]),
+        (default_spawn[0] - 1, default_spawn[1]),
+        (default_spawn[0], default_spawn[1] + 1),
+        (default_spawn[0], default_spawn[1] - 1),
+    }
     # Free interior tiles (avoid the 1-tile band next to walls so spawns look ok)
     free: list[tuple[int, int]] = [
         (x, y)
         for x in range(2, ROOM_W - 2)
         for y in range(2, ROOM_H - 2)
-        if tiles[x][y] == Tile.FLOOR
+        if tiles[x][y] == Tile.FLOOR and (x, y) not in reserved
     ]
     rng.shuffle(free)
 
@@ -132,6 +142,6 @@ def build_room_layout(location: Location) -> RoomLayout:
         doors=doors,
         objects=objects,
         characters=characters,
-        default_spawn=(ROOM_W // 2, ROOM_H // 2),
+        default_spawn=default_spawn,
         spawn_from=spawn_from,
     )

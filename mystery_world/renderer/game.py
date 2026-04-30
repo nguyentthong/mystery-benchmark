@@ -359,10 +359,14 @@ class MysteryGame:
     # ------------------------------------------------------------------
 
     def _try_move_player(self, dx: float, dy: float) -> None:
-        """Move axis-by-axis with AABB-vs-tile collision."""
+        """Move axis-by-axis with AABB-vs-tile collision against walls,
+        objects, and characters."""
         radius = TILE_PX * 0.30  # avatar half-extent
 
         def blocked_at(px: float, py: float) -> bool:
+            # Player tile (centre)
+            ctx = int(px // TILE_PX)
+            cty = int(py // TILE_PX)
             # Sample the four corners of the avatar's AABB
             for cx in (px - radius, px + radius):
                 for cy in (py - radius, py + radius):
@@ -370,6 +374,14 @@ class MysteryGame:
                     ty = int(cy // TILE_PX)
                     if not self.current_layout.is_walkable(tx, ty):
                         return True
+                    # Solid collision against objects and characters, but
+                    # only on the centre tile we'd be standing on (so we
+                    # can still brush past adjacent props).
+                    if (tx, ty) == (ctx, cty):
+                        if self.current_layout.object_at(tx, ty):
+                            return True
+                        if self.current_layout.character_at(tx, ty):
+                            return True
             return False
 
         new_x = self.player_px + dx
@@ -379,8 +391,7 @@ class MysteryGame:
         if not blocked_at(self.player_px, new_y):
             self.player_py = new_y
 
-        # Walking onto a door tile = auto-trigger MOVE (feels natural in a
-        # top-down adventure). We still respect the discrete action cost.
+        # Walking onto a door tile = auto-trigger MOVE.
         tx = int(self.player_px // TILE_PX)
         ty = int(self.player_py // TILE_PX)
         adj = self.current_layout.door_at(tx, ty)
@@ -414,6 +425,24 @@ class MysteryGame:
                 else:
                     self.sprites.draw_floor(self.screen, rect)
 
+    def _draw_label(
+        self,
+        text: str,
+        cx: int,
+        by: int,
+        color: tuple[int, int, int] = HUD_TEXT,
+        bg: tuple[int, int, int] = (0, 0, 0),
+    ) -> None:
+        """Pill-shaped label centred horizontally below a sprite."""
+        surf = self.font_sm.render(text, True, color)
+        pad_x, pad_y = 6, 2
+        rect = surf.get_rect(midtop=(cx, by + 2))
+        bg_rect = rect.inflate(pad_x * 2, pad_y * 2)
+        bg_surf = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
+        bg_surf.fill((*bg, 200))
+        self.screen.blit(bg_surf, bg_rect.topleft)
+        self.screen.blit(surf, rect)
+
     def _draw_objects(self) -> None:
         ox, oy = self._room_origin()
         for oid, (x, y) in self.current_layout.objects.items():
@@ -429,6 +458,8 @@ class MysteryGame:
                     discovered = ev.id in self.env._discovered_evidence
             rect = pygame.Rect(ox + x * TILE_PX, oy + y * TILE_PX, TILE_PX, TILE_PX)
             self.sprites.draw_object(self.screen, rect, obj, discovered, ev_state)
+            # Object name underneath
+            self._draw_label(obj.name, rect.centerx, rect.bottom - 4, color=HUD_DIM)
 
     def _draw_characters(self) -> None:
         ox, oy = self._room_origin()
@@ -438,12 +469,22 @@ class MysteryGame:
                 continue
             rect = pygame.Rect(ox + x * TILE_PX, oy + y * TILE_PX, TILE_PX, TILE_PX)
             self.sprites.draw_character(self.screen, rect, char)
+            color = HUD_TEXT if char.is_alive else HUD_DIM
+            self._draw_label(char.full_name, rect.centerx, rect.bottom - 4, color=color)
 
     def _draw_player(self) -> None:
         ox, oy = self._room_origin()
         cx = int(ox + self.player_px)
         cy = int(oy + self.player_py)
+        # Bright halo behind the avatar so the human can spot themselves
+        # at a glance even when standing among NPCs of similar palette.
+        halo = pygame.Surface((TILE_PX * 2, TILE_PX * 2), pygame.SRCALPHA)
+        pygame.draw.circle(halo, (255, 220, 90, 80), (TILE_PX, TILE_PX), TILE_PX - 4)
+        pygame.draw.circle(halo, (255, 220, 90, 160), (TILE_PX, TILE_PX), TILE_PX - 4, 3)
+        self.screen.blit(halo, (cx - TILE_PX, cy - TILE_PX))
         self.sprites.draw_player(self.screen, cx, cy, TILE_PX // 3)
+        # YOU label — bold, gold
+        self._draw_label("◆ YOU", cx, cy + TILE_PX // 2 - 4, color=(255, 220, 90))
 
     def _draw_topbar(self) -> None:
         bar = pygame.Rect(0, 0, self.win_w, TOPBAR_H)
@@ -749,56 +790,119 @@ class MysteryGame:
     def _is_episode_over(self) -> bool:
         return self.env.is_solved or self.env.budget_remaining <= 0
 
+    @staticmethod
+    def _star_rating(score: float) -> str:
+        """Composite 0..1 → 0..5 stars (rounded to nearest)."""
+        score = max(0.0, min(1.0, float(score or 0.0)))
+        n = round(score * 5)
+        return "★" * n + "☆" * (5 - n)
+
     def _build_solution_lines(self) -> list[tuple[str, tuple[int, int, int]]]:
-        """Full Watson-style reveal: who, why, weapon, room, evidence chain,
-        alibi, innocents' corroborators, and score breakdown."""
+        """Detective-novel reveal — gamer-friendly story first, numbers last."""
         from mystery_world.entities import CharacterRole, EdgeType
 
         state = self.state
         env = self.env
-        lines: list[tuple[str, tuple[int, int, int]]] = []
-
-        def H(t: str) -> None: lines.append((t, HUD_TEXT))
-        def D(t: str) -> None: lines.append((t, HUD_DIM))
-        def BL() -> None: lines.append(("", HUD_DIM))
-
         summary = env.get_episode_summary()
         score = summary.get("score_result") or {}
+        composite = float(score.get("composite_score", 0.0) or 0.0)
 
         culprit = state.get_culprit()
         weapon = state.objects.get(state.murder_weapon_id)
         room = state.locations.get(state.murder_location_id)
-        body_loc = state.locations.get(state.body_location_id)
+        victim = state.characters.get(state.victim_id)
 
-        # Verdict + composite
+        culprit_name = culprit.full_name if culprit else "the killer"
+        weapon_name = weapon.name if weapon else "an unknown weapon"
+        room_name = room.name if room else "an unknown room"
+        victim_name = victim.full_name if victim else "the victim"
+
+        lines: list[tuple[str, tuple[int, int, int]]] = []
+
+        # Headline colours
+        GOLD = (255, 220, 90)
+        GREEN = (130, 220, 150)
+        RED = (240, 110, 110)
+
+        def push(text: str, color: tuple[int, int, int] = HUD_TEXT) -> None:
+            lines.append((text, color))
+
+        def hdr(text: str) -> None:
+            lines.append(("", HUD_DIM))
+            lines.append((text, GOLD))
+            lines.append(("─" * 42, HUD_DIM))
+
+        def body(text: str, color: tuple[int, int, int] = HUD_TEXT) -> None:
+            for line in self._wrap(text, 78):
+                lines.append((line, color))
+
+        def bullet(text: str, color: tuple[int, int, int] = HUD_TEXT) -> None:
+            wrapped = self._wrap(text, 74)
+            if wrapped:
+                lines.append(("  •  " + wrapped[0], color))
+                for cont in wrapped[1:]:
+                    lines.append(("     " + cont, color))
+
+        # ── Verdict + star rating ──
         if env.is_solved and summary.get("accusation_correct"):
-            H("✓ CASE CLOSED — your accusation was correct.")
+            push(f"  {self._star_rating(composite)}    CASE CLOSED    {self._star_rating(composite)}", GREEN)
+            push("  You caught the killer.", GREEN)
         elif env.is_solved:
-            H("✗ CASE FAILED — your accusation was wrong.")
+            push(f"  {self._star_rating(composite)}    CASE FAILED    {self._star_rating(composite)}", RED)
+            push("  Your accusation was wrong. The real killer walks free.", RED)
         else:
-            H("⏳ TIME RAN OUT — you exhausted your action budget.")
-        if score:
-            D(f"  composite score: {score.get('composite_score', 0):.3f}")
-        BL()
+            push(f"  {self._star_rating(composite)}    TIME RAN OUT    {self._star_rating(composite)}", RED)
+            push("  You ran out of time before naming a suspect.", RED)
+        push("")
 
-        # The truth
-        H("THE TRUTH")
-        if culprit:
-            D(f"  Culprit: {culprit.full_name}")
-            if culprit.motive:
-                D(f"  Motive:  {culprit.motive}")
-        D(f"  Weapon:  {weapon.name if weapon else '?'}")
-        D(f"  Where:   {room.name if room else '?'}"
-          + (f"  (body found in {body_loc.name})" if body_loc and body_loc.id != state.murder_location_id else ""))
-        D(f"  When:    step {state.murder_step}")
-        BL()
+        # ── The reveal: one-line drama ──
+        push(f"  It was {culprit_name},", HUD_TEXT)
+        push(f"  in the {room_name},", HUD_TEXT)
+        push(f"  with the {weapon_name}.", HUD_TEXT)
 
-        # Locard triangle
-        H("LOCARD TRIANGLE — evidence that solved each edge")
+        # ── Why ──
+        hdr("WHY?")
+        if culprit and culprit.motive:
+            body(f"{culprit_name} was driven by {culprit.motive}.")
+        else:
+            body(f"The motive remains murky — but the evidence places {culprit_name} at the scene.")
+
+        # ── How they tried to lie ──
+        hdr("HOW THEY TRIED TO COVER IT UP")
+        if culprit and culprit.alibi_claims:
+            claim = culprit.alibi_claims[0]
+            body(
+                f"{culprit_name} claimed to be at the {claim.location_name} "
+                f"at {claim.clock_time_str}."
+            )
+            if culprit.alibi_corroborator_id:
+                corr = state.characters.get(culprit.alibi_corroborator_id)
+                corr_name = corr.full_name if corr else "someone"
+                if culprit.alibi_corroboration_is_genuine:
+                    body(
+                        f"{corr_name} backed up the story — but {corr_name}'s "
+                        "account didn't square with what the physical evidence revealed."
+                    )
+                else:
+                    body(
+                        f"{corr_name} backed up the story — but {corr_name} was "
+                        f"lying for them. A house of cards."
+                    )
+            else:
+                body("No one could back up the story. A flimsy alibi at best.")
+            body(
+                f"While the alibi pointed to the {claim.location_name}, the evidence "
+                f"placed {culprit_name} firmly in the {room_name} when {victim_name} died."
+            )
+        else:
+            body(f"{culprit_name} offered no alibi — and the evidence wasn't kind.")
+
+        # ── The trail of evidence ──
+        hdr("THE TRAIL OF EVIDENCE")
         edges = [
-            (EdgeType.SUSPECT_WEAPON, "Suspect ↔ Weapon"),
-            (EdgeType.WEAPON_VICTIM,  "Weapon  ↔ Victim"),
-            (EdgeType.SUSPECT_ROOM,   "Suspect ↔ Room"),
+            (EdgeType.SUSPECT_WEAPON, "[1]  Linking the killer to the weapon"),
+            (EdgeType.WEAPON_VICTIM,  "[2]  Linking the weapon to the victim"),
+            (EdgeType.SUSPECT_ROOM,   "[3]  Placing the killer at the scene"),
         ]
         for edge_type, label in edges:
             valid = [
@@ -806,85 +910,58 @@ class MysteryGame:
                 if not ev.is_red_herring
                 and ev.relevance is not None
                 and ev.relevance.edge_type == edge_type
-                and abs(ev.relevance.contact_timestamp - state.murder_timestamp) < state.freshness_threshold
+                and abs(ev.relevance.contact_timestamp - state.murder_timestamp)
+                    < state.freshness_threshold
             ]
-            H(f"  {label}")
             if not valid:
-                D("    (no fresh evidence of this kind in the world)")
                 continue
+            push("")
+            push(label, HUD_TEXT)
             for ev in valid:
                 loc = state.locations.get(ev.location_id)
-                marker = "✓" if ev.id in env._discovered_evidence else "·"
-                D(f"    {marker} [{ev.id}] {ev.name}  — {loc.name if loc else '?'}")
-                for line in self._wrap("        " + ev.description, 80):
-                    D(line)
-        BL()
+                where = f" — found in the {loc.name}" if loc else ""
+                check = " (you found this!)" if ev.id in env._discovered_evidence else " (you missed this)"
+                bullet(f"{ev.description}{where}.{check}",
+                       color=(GREEN if ev.id in env._discovered_evidence else HUD_DIM))
 
-        # Alibi contradiction
-        H("THE ALIBI")
-        if culprit and culprit.alibi_claims:
-            for claim in culprit.alibi_claims:
-                D(f"  Claimed: {culprit.full_name} said they were at {claim.location_name} at {claim.clock_time_str}")
-            if culprit.alibi_corroborator_id:
-                corr = state.characters.get(culprit.alibi_corroborator_id)
-                genuine = "(genuine)" if culprit.alibi_corroboration_is_genuine else "(LYING)"
-                D(f"  Corroborator: {corr.full_name if corr else '?'}  {genuine}")
-            else:
-                D("  Corroborator: none — claim was uncorroborated")
-            D(f"  Why it's a lie: at step {state.murder_step}, the culprit was actually in {room.name if room else '?'}.")
-        else:
-            D("  (Culprit had no formal alibi.)")
-        BL()
-
-        # Innocents' alibis
-        H("INNOCENTS — who was where, and who confirmed it")
-        innocents = [
-            c for c in state.characters.values()
-            if CharacterRole.SUSPECT in c.roles and not c.is_culprit and c.is_alive
-        ]
-        if not innocents:
-            D("  (No alibi'd innocents in this case.)")
-        for c in sorted(innocents, key=lambda x: x.full_name):
-            corr = state.characters.get(c.alibi_corroborator_id) if c.alibi_corroborator_id else None
-            corr_str = f" (witnessed by {corr.full_name})" if corr else " (uncorroborated)"
-            D(f"  · {c.full_name}{corr_str}")
-            for claim in c.alibi_claims:
-                D(f"      at {claim.clock_time_str}: {claim.location_name}")
-        BL()
-
-        # Score breakdown (only meaningful if an ACCUSE happened)
+        # ── Your detective work ──
+        hdr("YOUR DETECTIVE WORK")
+        n_found = len(summary.get("evidence_discovered", []))
+        n_total = len([e for e in state.evidence.values() if not e.is_red_herring])
+        n_intv = len(summary.get("characters_interviewed", []))
+        n_suspects = len([
+            c for c in state.characters.values() if CharacterRole.SUSPECT in c.roles
+        ])
+        actions_used = summary.get("actions_taken", "?")
+        budget = summary.get("budget", "?")
+        push(f"  Evidence found:        {n_found} / {n_total}")
+        push(f"  Suspects interviewed:  {n_intv} / {n_suspects}")
         if score:
-            H("SCORE BREAKDOWN")
-            D(f"  accusation:    {score.get('accusation_score', 0):.2f}    "
-              f"(suspect={int(score.get('correct_suspect', 0))}, "
-              f"weapon={int(score.get('correct_weapon', 0))}, "
-              f"room={int(score.get('correct_room', 0))})")
-            D(f"  triangle (sum of 3 F1s, max 3.0): {score.get('triangle_score', 0):.2f}")
-            D(f"     suspect↔weapon F1: {score.get('suspect_weapon_score', 0):.2f}"
-              f"   precision={score.get('suspect_weapon_precision', 0):.2f}"
-              f"   recall={score.get('suspect_weapon_recall', 0):.2f}")
-            D(f"     weapon↔victim  F1: {score.get('weapon_victim_score', 0):.2f}"
-              f"   precision={score.get('weapon_victim_precision', 0):.2f}"
-              f"   recall={score.get('weapon_victim_recall', 0):.2f}")
-            D(f"     suspect↔room   F1: {score.get('suspect_room_score', 0):.2f}"
-              f"   precision={score.get('suspect_room_precision', 0):.2f}"
-              f"   recall={score.get('suspect_room_recall', 0):.2f}")
-            D(f"  alibi:         {score.get('alibi_score', 0):.2f}    "
-              f"(cited={int(score.get('alibi_cited', 0))}, "
-              f"contradiction-valid={int(score.get('contradiction_valid', 0))})")
-            D(f"  elimination:   {score.get('elimination_score', 0):.2f}    "
-              f"({score.get('correct_eliminations', 0)} correct, "
-              f"{score.get('incorrect_eliminations', 0)} wrong, "
-              f"of {score.get('total_innocents', 0)} innocents)")
-            D(f"  COMPOSITE:     {score.get('composite_score', 0):.3f}")
-            BL()
+            push(f"  Innocents cleared:     {score.get('correct_eliminations', 0)} / {score.get('total_innocents', 0)}")
+        push(f"  Actions used:          {actions_used} / {budget}")
 
-        H("Actions used: "
-          f"{summary.get('actions_taken', '?')} / {summary.get('budget', '?')}    "
-          f"Evidence found: {len(summary.get('evidence_discovered', []))}    "
-          f"Interviews: {len(summary.get('characters_interviewed', []))}")
-        BL()
-        H("Press ↑/↓ or PgUp/PgDn to scroll · ESC to exit")
+        # ── Try next ──
+        hdr("WHAT'S NEXT?")
+        push("  •  Replay this case — see if you can solve it cleaner")
+        push(f"  •  Try seed {state.seed + 1} — same difficulty, fresh case")
+        push("  •  Step up to the next difficulty for a real challenge")
+        push("")
+        push("  Press ↑/↓ or PgUp/PgDn to scroll · ESC to exit", HUD_DIM)
+
+        # ── For the curious: technical breakdown ──
+        if score:
+            hdr("THE NUMBERS  (for the curious)")
+            push(f"  Composite score:        {composite:.3f}", HUD_DIM)
+            push(f"  Accusation:             {score.get('accusation_score', 0):.2f}"
+                 f"   suspect={int(score.get('correct_suspect', 0))}"
+                 f"   weapon={int(score.get('correct_weapon', 0))}"
+                 f"   room={int(score.get('correct_room', 0))}", HUD_DIM)
+            push(f"  Locard triangle:", HUD_DIM)
+            push(f"    suspect ↔ weapon  F1 = {score.get('suspect_weapon_score', 0):.2f}", HUD_DIM)
+            push(f"    weapon  ↔ victim  F1 = {score.get('weapon_victim_score', 0):.2f}", HUD_DIM)
+            push(f"    suspect ↔ room    F1 = {score.get('suspect_room_score', 0):.2f}", HUD_DIM)
+            push(f"  Alibi consistency:      {score.get('alibi_score', 0):.2f}", HUD_DIM)
+            push(f"  Innocent eliminations:  {score.get('elimination_score', 0):.2f}", HUD_DIM)
         return lines
 
     def _draw_endscreen(self) -> None:
