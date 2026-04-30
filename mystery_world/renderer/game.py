@@ -357,7 +357,13 @@ class MysteryGame:
         if self.env.is_solved or self.env.budget_remaining <= 0:
             return
         result = self.env.step(action, **kwargs)
-        self.last_observation = render_step_observation(self.env, result.observation)
+        obs = render_step_observation(self.env, result.observation)
+        # After a MOVE the new room is already drawn on screen — strip the
+        # verbose "you see ... there are also ..." enumeration from the
+        # status line so it only reads "You move to the Greenhouse."
+        if action == AgentAction.MOVE:
+            obs = obs.split("\n", 1)[0]
+        self.last_observation = obs
         if not result.success:
             self._show_toast(result.observation)
         # World may have ticked → refresh dynamic content for the now-current room
