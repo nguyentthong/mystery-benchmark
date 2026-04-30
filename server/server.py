@@ -57,7 +57,12 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 # ---------------------------------------------------------------------------
 
 SESSION_TIMEOUT_SECONDS = 30 * 60   # 30 minutes idle timeout
-TARGET_FPS = 30
+TARGET_FPS_ACTIVE = 30              # while frames keep changing
+TARGET_FPS_IDLE = 5                 # while screen has been static
+IDLE_FRAMES_BEFORE_THROTTLE = 30    # ~1 s of identical frames -> drop to idle
+# WebP lossless gives the smallest payload for our sprite art (~35% the size
+# of PNG) — bandwidth-efficient for players far from HF servers.
+FRAME_FORMAT = "WEBP"
 
 
 @dataclass
@@ -228,7 +233,6 @@ async def play_socket(ws: WebSocket, session_id: str) -> None:
     await ws.accept()
     sess.touch()
     game = sess.game
-    frame_interval = 1.0 / TARGET_FPS
 
     async def _input_pump() -> None:
         try:
@@ -258,20 +262,37 @@ async def play_socket(ws: WebSocket, session_id: str) -> None:
 
     input_task = asyncio.create_task(_input_pump())
 
+    last_sent: bytes | None = None
+    idle_frames = 0
+
     try:
         while not sess.closed:
             t0 = time.monotonic()
             still_running = game._tick()
-            if not still_running:
-                # Send one last frame then break
-                pass
-            png = game.get_frame_png()
-            await ws.send_bytes(png)
+            # Encode JPEG off-thread so the next tick can run input handling
+            # while the previous frame is still being serialised.
+            frame = await asyncio.to_thread(
+                game.get_frame_bytes, FRAME_FORMAT
+            )
+            if frame != last_sent:
+                await ws.send_bytes(frame)
+                last_sent = frame
+                idle_frames = 0
+            else:
+                idle_frames += 1
             sess.touch()
             if not still_running:
                 break
+            # Adaptive pacing: full speed while the screen is changing, slow
+            # tick rate once nothing has changed for a beat (player reading
+            # the sidebar, a modal open, etc.).
+            target_fps = (
+                TARGET_FPS_IDLE
+                if idle_frames > IDLE_FRAMES_BEFORE_THROTTLE
+                else TARGET_FPS_ACTIVE
+            )
             elapsed = time.monotonic() - t0
-            await asyncio.sleep(max(0.0, frame_interval - elapsed))
+            await asyncio.sleep(max(0.0, 1.0 / target_fps - elapsed))
     except WebSocketDisconnect:
         pass
     finally:

@@ -66,8 +66,8 @@
         };
 
         ws.onmessage = (ev) => {
-          // Frame: PNG bytes
-          const blob = new Blob([ev.data], { type: "image/png" });
+          // Frame: WebP lossless (smallest payload for the sprite art)
+          const blob = new Blob([ev.data], { type: "image/webp" });
           const oldUrl = pendingObj;
           pendingObj = URL.createObjectURL(blob);
           const fresh = new Image();
