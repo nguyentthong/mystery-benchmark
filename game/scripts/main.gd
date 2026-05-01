@@ -34,6 +34,14 @@ var _focused_entity: Dictionary = {}
 var _request_counter: int = 0
 var _briefing_shown: bool = false
 var _game_over: bool = false
+# After a room transition, the player is teleported to a spawn cell next to
+# the door they entered through. Godot's Area3D for that door is *almost*
+# touching the player's capsule (~0.15m gap with TILE_M=1m), and can fire
+# body_entered on the frame the area is created — re-triggering MOVE and
+# burning a second action. Suppress door triggers during a brief grace
+# period after every spawn.
+const DOOR_COOLDOWN_SEC := 0.5
+var _door_cooldown: float = 0.0
 
 
 func _ready() -> void:
@@ -187,6 +195,7 @@ func _apply_room(msg: Dictionary) -> void:
 	_hud.hide_all_modals()
 	_hud.hide_start_form()
 	_set_transitioning(false)
+	_door_cooldown = DOOR_COOLDOWN_SEC
 
 	# Auto-open the case file briefing on the very first room of a new game,
 	# the way the 2D version greets the player with the case explanation.
@@ -199,6 +208,8 @@ func _apply_room(msg: Dictionary) -> void:
 
 func _on_door_entered(leads_to: String) -> void:
 	if _transitioning or leads_to == "":
+		return
+	if _door_cooldown > 0.0:
 		return
 	if _hud.is_any_modal_open():
 		return
@@ -405,6 +416,8 @@ func _next_rid(prefix: String) -> String:
 func _process(delta: float) -> void:
 	if _hud:
 		_hud.set_fps(Engine.get_frames_per_second())
+	if _door_cooldown > 0.0:
+		_door_cooldown = max(0.0, _door_cooldown - delta)
 	_track_npcs_to_player(delta)
 
 
