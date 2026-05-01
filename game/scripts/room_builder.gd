@@ -712,16 +712,15 @@ func _spawn_character(
 		shirt_color = Color(0.42, 0.36, 0.30)  # neutral darker tone for the body
 		skin_color = skin_color.darkened(0.25)
 	var pants_color := Color(0.22, 0.20, 0.17)
-	# Bucket meaning:
-	#   0,1 -> seated, reading a book
-	#   2   -> seated, idle
-	#   3   -> standing, reading a book
-	#   4   -> standing, holding a broom (cleaning)
-	#   5   -> standing, listening to a small radio (placed near them)
-	var is_seated: bool = alive and role != "victim" and activity <= 2
-	var has_book: bool = alive and role != "victim" and (activity == 0 or activity == 1 or activity == 3)
-	var has_broom: bool = alive and role != "victim" and activity == 4
-	var has_radio: bool = alive and role != "victim" and activity == 5
+	# Activity buckets (all SEATED — manor evening, no janitorial poses):
+	#   0, 1 -> reading a book (bent arms holding it open in lap)
+	#   2    -> writing letters (small desk in front, pen + paper + inkwell)
+	#   3, 4 -> listening with headphones (radio on side table, cord to ears)
+	#   5    -> idle (hands resting in lap, no prop)
+	var is_seated: bool = alive and role != "victim"
+	var act_reading: bool = is_seated and (activity == 0 or activity == 1)
+	var act_writing: bool = is_seated and activity == 2
+	var act_headphones: bool = is_seated and (activity == 3 or activity == 4)
 
 	# Dimensions in metres at SCALE=1; total figure ~2.15m -> SCALE 0.85
 	# yields ~1.83m, a believable human height.
@@ -760,38 +759,117 @@ func _spawn_character(
 	if is_seated:
 		_add_block(rig, Vector3(0.0, sit_y + 0.05, 0.18), Vector3(TORSO_W * 0.85, 0.10, 0.30), pants_color)
 
-	# Activity props — held or placed near the character.
-	if has_book:
-		# Open book held in front, at chest level. Slightly tilted up.
-		var book_y: float = leg_top + TORSO_H * 0.30
-		var book_z: float = TORSO_D * 0.5 + 0.10
-		_add_block(rig, Vector3(0.0, book_y, book_z), Vector3(0.36, 0.04, 0.26), Color(0.92, 0.88, 0.78))
-		_add_block(rig, Vector3(0.0, book_y + 0.025, book_z), Vector3(0.34, 0.005, 0.24), Color(0.20, 0.15, 0.12))
+	# Activity props — held in hand, on a desk, or worn.
+	if act_reading:
+		# Open book between the bent forearms. Tilt the spine slightly up
+		# so the player can see it's a book, not just a brick.
+		var hand_z_book: float = ARM_H * 0.55 * 0.5 + 0.04 + ARM_H * 0.55 * 0.5 + ARM_W * 0.4 + 0.05
+		var book_y: float = (torso_top - ARM_W * 0.4) - ARM_H * 0.50 - ARM_W * 0.3
+		# Open book base (cover)
+		_add_block(rig, Vector3(0.0, book_y, hand_z_book), Vector3(0.42, 0.02, 0.30), Color(0.30, 0.18, 0.12))
+		# Page surface (slightly raised, off-white)
+		_add_block(rig, Vector3(0.0, book_y + 0.018, hand_z_book), Vector3(0.40, 0.005, 0.28), Color(0.94, 0.90, 0.80))
 		# Spine ridge in the middle
-		_add_block(rig, Vector3(0.0, book_y + 0.03, book_z), Vector3(0.02, 0.005, 0.24), Color(0.45, 0.20, 0.15))
-	if has_broom:
-		# Broom shaft held diagonally to the side.
-		var shaft_color := Color(0.55, 0.40, 0.20)
-		var bristle_color := Color(0.85, 0.65, 0.30)
-		_add_block(rig, Vector3(TORSO_W * 0.5 + 0.10, leg_top + 0.55, 0.05), Vector3(0.04, 1.30, 0.04), shaft_color)
-		_add_block(rig, Vector3(TORSO_W * 0.5 + 0.10, 0.10, 0.10), Vector3(0.18, 0.20, 0.10), bristle_color)
-	if has_radio:
-		# Small radio on the floor next to the character.
-		var radio_x: float = TORSO_W * 0.5 + 0.30
-		_add_block(rig, Vector3(radio_x, 0.18, 0.0), Vector3(0.30, 0.20, 0.18), Color(0.30, 0.20, 0.15))
-		# Speaker grille
-		_add_block(rig, Vector3(radio_x, 0.18, 0.10), Vector3(0.22, 0.12, 0.005), Color(0.15, 0.12, 0.10))
-		# Antenna
-		_add_block(rig, Vector3(radio_x + 0.12, 0.55, -0.06), Vector3(0.02, 0.55, 0.02), Color(0.65, 0.65, 0.70))
-		# Knobs
-		_add_block(rig, Vector3(radio_x - 0.10, 0.13, 0.10), Vector3(0.04, 0.04, 0.02), Color(0.85, 0.65, 0.20))
-		_add_block(rig, Vector3(radio_x + 0.10, 0.13, 0.10), Vector3(0.04, 0.04, 0.02), Color(0.85, 0.65, 0.20))
+		_add_block(rig, Vector3(0.0, book_y + 0.025, hand_z_book), Vector3(0.015, 0.01, 0.28), Color(0.45, 0.30, 0.20))
+		# A few text lines suggested as thin dark strips
+		for i in 4:
+			var ly: float = book_y + 0.022
+			var lz_offset: float = -0.10 + i * 0.04
+			_add_block(rig, Vector3(-0.10, ly, hand_z_book + lz_offset), Vector3(0.12, 0.002, 0.005), Color(0.10, 0.08, 0.06))
+			_add_block(rig, Vector3( 0.10, ly, hand_z_book + lz_offset), Vector3(0.12, 0.002, 0.005), Color(0.10, 0.08, 0.06))
 
-	# Arms (sleeve = shirt color, hanging straight down from shoulders)
-	var arm_y_center: float = torso_top - ARM_H * 0.5
+	elif act_writing:
+		# Small writing desk in front of the seat with paper, pen, inkwell.
+		var desk_top_y: float = sit_y + 0.42
+		var desk_z: float = 0.55
+		var desk_w: float = 0.85
+		var desk_d: float = 0.45
+		# Top
+		_add_block(rig, Vector3(0.0, desk_top_y, desk_z), Vector3(desk_w, 0.05, desk_d), Color(0.40, 0.28, 0.18))
+		# 4 legs
+		var dl_inset_x: float = desk_w * 0.5 - 0.06
+		var dl_inset_z: float = desk_d * 0.5 - 0.06
+		for sx in [-1, 1]:
+			for sz in [-1, 1]:
+				_add_block(
+					rig,
+					Vector3(sx * dl_inset_x, desk_top_y * 0.5, desk_z + sz * dl_inset_z),
+					Vector3(0.05, desk_top_y, 0.05),
+					Color(0.32, 0.22, 0.14),
+				)
+		# Paper sheet on top
+		_add_block(rig, Vector3(-0.05, desk_top_y + 0.026, desk_z), Vector3(0.32, 0.005, 0.22), Color(0.94, 0.90, 0.80))
+		# Pen lying on the paper, angled slightly
+		_add_block(rig, Vector3(0.05, desk_top_y + 0.030, desk_z + 0.04), Vector3(0.14, 0.012, 0.014), Color(0.10, 0.08, 0.05))
+		# Inkwell on the desk
+		_add_block(rig, Vector3(0.30, desk_top_y + 0.04, desk_z - 0.10), Vector3(0.06, 0.08, 0.06), Color(0.20, 0.18, 0.30))
+		# A few finished lines on the paper
+		for i in 5:
+			_add_block(
+				rig,
+				Vector3(-0.10, desk_top_y + 0.029, desk_z - 0.05 + i * 0.025),
+				Vector3(0.18, 0.001, 0.005),
+				Color(0.10, 0.08, 0.06),
+			)
+
+	if act_headphones:
+		# Headphones on the head + cord trailing down to a small radio on
+		# a side table to the character's right.
+		var head_centre_y: float = torso_top + HEAD * 0.5
+		var head_top_y: float = torso_top + HEAD
+		# Headband across the top of the head
+		_add_block(rig, Vector3(0.0, head_top_y - 0.02, 0.0), Vector3(HEAD * 1.05, 0.04, HEAD * 0.30), Color(0.20, 0.15, 0.12))
+		# Two ear cups
+		var cup_w: float = 0.10
+		_add_block(rig, Vector3(-(HEAD * 0.5 + cup_w * 0.5), head_centre_y - HEAD * 0.10, 0.0), Vector3(cup_w, 0.16, cup_w), Color(0.18, 0.13, 0.10))
+		_add_block(rig, Vector3( (HEAD * 0.5 + cup_w * 0.5), head_centre_y - HEAD * 0.10, 0.0), Vector3(cup_w, 0.16, cup_w), Color(0.18, 0.13, 0.10))
+		# Side table to the right of the character with a radio on it
+		var st_x: float = TORSO_W * 0.5 + 0.45
+		var st_top: float = sit_y + 0.10  # roughly arm-rest height
+		_add_block(rig, Vector3(st_x, st_top, 0.0), Vector3(0.45, 0.04, 0.45), Color(0.40, 0.28, 0.18))
+		var st_inset: float = 0.45 * 0.5 - 0.06
+		for ssx in [-1, 1]:
+			for ssz in [-1, 1]:
+				_add_block(rig, Vector3(st_x + ssx * st_inset, st_top * 0.5, ssz * st_inset), Vector3(0.04, st_top, 0.04), Color(0.32, 0.22, 0.14))
+		# Radio on top of the side table
+		_add_block(rig, Vector3(st_x, st_top + 0.13, 0.0), Vector3(0.32, 0.22, 0.20), Color(0.30, 0.20, 0.15))
+		# Speaker grille on front of radio
+		_add_block(rig, Vector3(st_x, st_top + 0.13, 0.105), Vector3(0.22, 0.14, 0.005), Color(0.12, 0.10, 0.08))
+		# Knobs
+		_add_block(rig, Vector3(st_x - 0.10, st_top + 0.05, 0.105), Vector3(0.04, 0.04, 0.02), Color(0.85, 0.65, 0.20))
+		_add_block(rig, Vector3(st_x + 0.10, st_top + 0.05, 0.105), Vector3(0.04, 0.04, 0.02), Color(0.85, 0.65, 0.20))
+		# Antenna
+		_add_block(rig, Vector3(st_x + 0.13, st_top + 0.50, -0.06), Vector3(0.02, 0.50, 0.02), Color(0.65, 0.65, 0.70))
+		# Cord: ear cup to the radio, a few short segments
+		var cord := Color(0.10, 0.08, 0.06)
+		_add_block(rig, Vector3(HEAD * 0.5 + cup_w + 0.02, head_centre_y - HEAD * 0.30, 0.0), Vector3(0.015, 0.30, 0.015), cord)
+		_add_block(rig, Vector3((HEAD * 0.5 + cup_w + st_x) * 0.5, sit_y + 0.30, 0.0), Vector3(0.015, 0.30, 0.015), cord)
+		_add_block(rig, Vector3(st_x - 0.16, st_top + 0.20, 0.0), Vector3(0.015, 0.30, 0.015), cord)
+
+	# Arms — bent forward (held-in-front pose) for reading/writing,
+	# otherwise hanging straight down from the shoulders.
 	var shoulder_x: float = TORSO_W * 0.5 + ARM_W * 0.5
-	_add_block(rig, Vector3(-shoulder_x, arm_y_center, 0.0), Vector3(ARM_W, ARM_H, ARM_D), shirt_color)
-	_add_block(rig, Vector3( shoulder_x, arm_y_center, 0.0), Vector3(ARM_W, ARM_H, ARM_D), shirt_color)
+	var shoulder_y: float = torso_top - ARM_W * 0.5
+	if act_reading or act_writing:
+		# Upper arm: short vertical block from shoulder
+		var upper_h: float = ARM_H * 0.50
+		var elbow_y: float = shoulder_y - upper_h
+		_add_block(rig, Vector3(-shoulder_x, shoulder_y - upper_h * 0.5, 0.0), Vector3(ARM_W, upper_h, ARM_D), shirt_color)
+		_add_block(rig, Vector3( shoulder_x, shoulder_y - upper_h * 0.5, 0.0), Vector3(ARM_W, upper_h, ARM_D), shirt_color)
+		# Forearm: horizontal forward (in +Z direction)
+		var fore_l: float = ARM_H * 0.55
+		var fore_z: float = fore_l * 0.5 + 0.04
+		_add_block(rig, Vector3(-shoulder_x * 0.7, elbow_y - ARM_W * 0.4, fore_z), Vector3(ARM_W, ARM_W, fore_l), shirt_color)
+		_add_block(rig, Vector3( shoulder_x * 0.7, elbow_y - ARM_W * 0.4, fore_z), Vector3(ARM_W, ARM_W, fore_l), shirt_color)
+		# Hands at the ends (skin colour)
+		var hand_z: float = fore_z + fore_l * 0.5 + ARM_W * 0.4
+		_add_block(rig, Vector3(-shoulder_x * 0.6, elbow_y - ARM_W * 0.4, hand_z), Vector3(ARM_W * 1.0, ARM_W, ARM_W * 1.4), skin_color)
+		_add_block(rig, Vector3( shoulder_x * 0.6, elbow_y - ARM_W * 0.4, hand_z), Vector3(ARM_W * 1.0, ARM_W, ARM_W * 1.4), skin_color)
+	else:
+		# Hanging arms (default)
+		var arm_y_center: float = torso_top - ARM_H * 0.5
+		_add_block(rig, Vector3(-shoulder_x, arm_y_center, 0.0), Vector3(ARM_W, ARM_H, ARM_D), shirt_color)
+		_add_block(rig, Vector3( shoulder_x, arm_y_center, 0.0), Vector3(ARM_W, ARM_H, ARM_D), shirt_color)
 
 	# Head (skin)
 	_add_block(rig, Vector3(0.0, torso_top + HEAD * 0.5, 0.0), Vector3(HEAD, HEAD, HEAD), skin_color)
