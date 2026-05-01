@@ -68,7 +68,7 @@ func build_from(room: Dictionary, tile_m: float) -> void:
 	_add_walls(tiles, width, height, tile_m)
 	_add_decor(width, height, tile_m, room.get("doors", []))
 	_add_door_triggers(room.get("doors", []), tile_m)
-	_add_objects(room.get("objects", []), tile_m)
+	_add_objects(room.get("objects", []), tile_m, width, height, room.get("doors", []))
 	_add_characters(room.get("characters", []), tile_m)
 	_add_lighting(width, height, tile_m)
 
@@ -220,24 +220,232 @@ func _on_door_body_entered(body: Node, leads_to: String) -> void:
 # Entities
 # ---------------------------------------------------------------------------
 
-func _add_objects(objects: Array, tile_m: float) -> void:
+const WALL_MOUNT_PATTERNS := ["mirror", "curtain", "window", "painting", "frame", "ledge"]
+
+
+func _is_wall_mounted(entity_name: String) -> bool:
+	var lower := entity_name.to_lower()
+	for p in WALL_MOUNT_PATTERNS:
+		if p in lower:
+			return true
+	return false
+
+
+func _add_objects(objects: Array, tile_m: float, width: int, height: int, doors: Array) -> void:
+	# Split: anything wall-mountable (mirror, curtain, painting, window
+	# ledge) gets stuck on a real wall instead of standing on the floor.
+	var wall_objects: Array = []
+	var floor_objects: Array = []
 	for o in objects:
+		if _is_wall_mounted(String(o.get("name", ""))):
+			wall_objects.append(o)
+		else:
+			floor_objects.append(o)
+
+	# Floor-placed props (everything else)
+	for o in floor_objects:
 		var kind: String = String(o.get("kind", "object"))
 		var color: Color
 		match kind:
 			"weapon":        color = WEAPON_COLOR
 			"murder_weapon": color = MURDER_WEAPON_COLOR
 			_:               color = OBJECT_COLOR
-
 		var entity_name: String = String(o.get("name", "object"))
 		var ox: int = int(o.get("x", 0))
 		var oy: int = int(o.get("y", 0))
-
 		var holder := _spawn_prop_box(ox, oy, tile_m, color, entity_name, 0.55)
 		holder.set_meta("entity_kind", "object")
 		holder.set_meta("entity_name", entity_name)
 		holder.set_meta("entity_id", String(o.get("id", "")))
 		holder.set_meta("entity_subkind", kind)
+
+	# Wall-mounted props
+	var slots := _build_wall_slots(width, height, tile_m, doors, wall_objects.size())
+	for i in wall_objects.size():
+		var wo: Dictionary = wall_objects[i]
+		if i >= slots.size():
+			# Out of wall slots — fall back to floor placement
+			var fallback_kind: String = String(wo.get("kind", "object"))
+			var fallback_name: String = String(wo.get("name", "object"))
+			var fallback_x: int = int(wo.get("x", 0))
+			var fallback_y: int = int(wo.get("y", 0))
+			var fb_holder := _spawn_prop_box(fallback_x, fallback_y, tile_m, OBJECT_COLOR, fallback_name, 0.55)
+			fb_holder.set_meta("entity_kind", "object")
+			fb_holder.set_meta("entity_name", fallback_name)
+			fb_holder.set_meta("entity_id", String(wo.get("id", "")))
+			fb_holder.set_meta("entity_subkind", fallback_kind)
+			continue
+		_spawn_wall_object(wo, slots[i])
+
+
+func _build_wall_slots(width: int, height: int, tile_m: float, doors: Array, needed: int) -> Array:
+	# Generate evenly-spaced positions along walls. Walls without doors are
+	# filled first; door-walls are used only if the room has more wall
+	# objects than empty walls can hold.
+	var size_x: float = width * tile_m
+	var size_z: float = height * tile_m
+	var doors_walls: Array = []
+	for d in doors:
+		doors_walls.append(String(d.get("wall", "")))
+
+	var fracs := [0.30, 0.70, 0.20, 0.80, 0.50]  # priority order along each wall
+	var ordered_walls: Array = []
+	# Walls without doors first
+	for w in ["north", "south", "east", "west"]:
+		if not w in doors_walls:
+			ordered_walls.append(w)
+	# Then walls with doors (skip the door's slot via fracs offset)
+	for w in ["north", "south", "east", "west"]:
+		if w in doors_walls:
+			ordered_walls.append(w)
+
+	var poke: float = 0.10
+	var y: float = 1.40
+
+	var slots: Array = []
+	for w in ordered_walls:
+		for f in fracs:
+			# Skip door-blocking centre on door walls
+			if w in doors_walls and absf(f - 0.5) < 0.18:
+				continue
+			var pos: Vector3
+			var rot_y: float
+			match w:
+				"north":
+					pos = Vector3(size_x * f, y, 1.0 + poke)
+					rot_y = PI  # face +Z (south, into room)
+				"south":
+					pos = Vector3(size_x * f, y, size_z - 1.0 - poke)
+					rot_y = 0.0  # face -Z (north, into room)
+				"east":
+					pos = Vector3(size_x - 1.0 - poke, y, size_z * f)
+					rot_y = -PI * 0.5  # face -X (west, into room)
+				"west":
+					pos = Vector3(1.0 + poke, y, size_z * f)
+					rot_y = PI * 0.5  # face +X (east, into room)
+				_:
+					continue
+			slots.append({"pos": pos, "rot_y": rot_y, "wall": w})
+			if slots.size() >= needed:
+				return slots
+	return slots
+
+
+func _spawn_wall_object(o: Dictionary, slot: Dictionary) -> void:
+	var entity_name: String = String(o.get("name", "object"))
+	var lower := entity_name.to_lower()
+	var color: Color = OBJECT_COLOR
+
+	var holder := Node3D.new()
+	holder.transform.origin = slot["pos"]
+	holder.rotation.y = float(slot["rot_y"])
+	add_child(holder)
+
+	holder.set_meta("entity_kind", "object")
+	holder.set_meta("entity_name", entity_name)
+	holder.set_meta("entity_id", String(o.get("id", "")))
+	holder.set_meta("entity_subkind", String(o.get("kind", "object")))
+
+	# Pick a wall-friendly mesh. We build it locally so we can orient it
+	# flat against the wall in the holder's local frame (the holder has
+	# already been rotated to face into the room).
+	var visual: Node3D
+	if "curtain" in lower:
+		visual = _build_wall_curtain()
+	elif "mirror" in lower:
+		visual = _build_wall_mirror()
+	elif "painting" in lower or "frame" in lower:
+		visual = _build_wall_painting()
+	elif "window" in lower or "ledge" in lower:
+		visual = _build_wall_window()
+	else:
+		visual = _build_wall_painting()  # generic catch-all
+	holder.add_child(visual)
+
+	# Collision body so the player can interact (raycast for E-key) and
+	# can't walk into the wall mounting.
+	var body := StaticBody3D.new()
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(1.4, 1.0, 0.2)
+	col.shape = shape
+	body.add_child(col)
+	holder.add_child(body)
+
+	# Label drifts slightly out from the wall, in front of the visual.
+	var label := Label3D.new()
+	label.text = entity_name
+	label.font_size = LABEL_FONT_SIZE
+	label.pixel_size = LABEL_PIXEL_SIZE
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.modulate = color.lerp(Color(1, 1, 1), 0.4)
+	label.outline_size = 8
+	label.outline_modulate = Color(0, 0, 0)
+	label.transform.origin = Vector3(0.0, 1.0, 0.20)
+	holder.add_child(label)
+
+
+func _build_wall_curtain() -> Node3D:
+	var root := Node3D.new()
+	var heavy := Color(0.40, 0.10, 0.15)
+	var rod := Color(0.35, 0.25, 0.10)
+	# Rod
+	_add_block(root, Vector3(0.0, 1.20, 0.0), Vector3(1.60, 0.06, 0.06), rod)
+	# Pleated panels (vertical strips poking slightly into the room)
+	for i in 9:
+		var x: float = -0.80 + i * 0.18
+		var c: Color = heavy.darkened(0.05) if (i % 2 == 0) else heavy
+		_add_block(root, Vector3(x, 0.10, 0.04), Vector3(0.16, 2.30, 0.06), c)
+	return root
+
+
+func _build_wall_mirror() -> Node3D:
+	var root := Node3D.new()
+	var frame := Color(0.65, 0.50, 0.20)
+	var glass := Color(0.75, 0.85, 0.92)
+	var glass_dark := Color(0.45, 0.55, 0.65)
+	# Ornate frame
+	_add_block(root, Vector3(0.0, 0.0, 0.0), Vector3(1.20, 1.60, 0.10), frame)
+	# Mirror surface
+	_add_block(root, Vector3(0.0, 0.0, 0.06), Vector3(1.00, 1.40, 0.02), glass)
+	# Subtle vertical reflection band for visual interest
+	_add_block(root, Vector3(-0.20, 0.0, 0.07), Vector3(0.10, 1.30, 0.005), glass_dark)
+	return root
+
+
+func _build_wall_painting() -> Node3D:
+	var root := Node3D.new()
+	var frame := Color(0.40, 0.30, 0.20)
+	# Frame
+	_add_block(root, Vector3(0.0, 0.0, 0.0), Vector3(1.30, 1.00, 0.08), frame)
+	# Three colored bands inside the frame as a stylized painting
+	var palette := [Color(0.18, 0.28, 0.45), Color(0.55, 0.45, 0.30), Color(0.85, 0.78, 0.55)]
+	for i in palette.size():
+		var c: Color = palette[i]
+		var h: float = 0.80 / palette.size()
+		_add_block(
+			root,
+			Vector3(0.0, -0.40 + h * 0.5 + i * h, 0.05),
+			Vector3(1.10, h, 0.02),
+			c,
+		)
+	return root
+
+
+func _build_wall_window() -> Node3D:
+	var root := Node3D.new()
+	var frame := Color(0.40, 0.30, 0.20)
+	var glass := Color(0.55, 0.70, 0.85)
+	# Outer frame (a thick rectangle)
+	_add_block(root, Vector3(0.0, 0.0, 0.0), Vector3(1.40, 1.40, 0.10), frame)
+	# Glass
+	_add_block(root, Vector3(0.0, 0.0, 0.06), Vector3(1.20, 1.20, 0.02), glass)
+	# Cross mullions
+	_add_block(root, Vector3(0.0, 0.0, 0.07), Vector3(1.20, 0.06, 0.03), frame)
+	_add_block(root, Vector3(0.0, 0.0, 0.07), Vector3(0.06, 1.20, 0.03), frame)
+	# Sill (narrow ledge sticking out at the bottom)
+	_add_block(root, Vector3(0.0, -0.78, 0.10), Vector3(1.60, 0.10, 0.20), frame.darkened(0.1))
+	return root
 
 
 func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: String, size: float) -> Node3D:
@@ -532,6 +740,14 @@ func _try_build_procedural_object(entity_name: String) -> Dictionary:
 		return {"node": _build_boots(), "height": 0.30}
 	if "umbrella" in lower:
 		return {"node": _build_umbrella(), "height": 1.00}
+	if "storage trunk" in lower or "trunk" in lower:
+		return {"node": _build_trunk(), "height": 0.55}
+	if "coat rack" in lower or "hat stand" in lower or "umbrella stand" in lower:
+		return {"node": _build_coatrack(), "height": 1.80}
+	if "radiator" in lower:
+		return {"node": _build_radiator(), "height": 0.80}
+	if "shelf of books" in lower or "bookcase" in lower or "bookshelf" in lower:
+		return {"node": _build_bookcase(), "height": 1.85}
 	if "envelope" in lower or "letter" in lower or "ticket" in lower or "receipt" in lower or "fingerprint" in lower:
 		return {"node": _build_paper(), "height": 0.10}
 	if "diary" in lower:
@@ -856,6 +1072,88 @@ func _build_chessboard() -> Node3D:
 	# A piece or two
 	_add_block(root, Vector3(-0.10, 0.10, -0.10), Vector3(0.05, 0.10, 0.05), light)
 	_add_block(root, Vector3( 0.10, 0.10,  0.10), Vector3(0.05, 0.10, 0.05), dark)
+	return root
+
+
+func _build_trunk() -> Node3D:
+	var root := Node3D.new()
+	var wood := Color(0.36, 0.22, 0.14)
+	var iron := Color(0.18, 0.16, 0.16)
+	var lid_wood := Color(0.30, 0.18, 0.12)
+	# Body
+	_add_block(root, Vector3(0.0, 0.20, 0.0), Vector3(0.80, 0.40, 0.45), wood)
+	# Lid
+	_add_block(root, Vector3(0.0, 0.45, 0.0), Vector3(0.82, 0.10, 0.47), lid_wood)
+	# Iron bands wrapping around
+	_add_block(root, Vector3(0.0, 0.20, 0.235), Vector3(0.84, 0.42, 0.02), iron)
+	_add_block(root, Vector3(0.0, 0.20, -0.235), Vector3(0.84, 0.42, 0.02), iron)
+	_add_block(root, Vector3(0.41, 0.20, 0.0), Vector3(0.02, 0.42, 0.46), iron)
+	_add_block(root, Vector3(-0.41, 0.20, 0.0), Vector3(0.02, 0.42, 0.46), iron)
+	# Lock plate on front
+	_add_block(root, Vector3(0.0, 0.40, 0.236), Vector3(0.10, 0.10, 0.02), iron)
+	return root
+
+
+func _build_coatrack() -> Node3D:
+	var root := Node3D.new()
+	var wood := Color(0.30, 0.20, 0.12)
+	var brass := Color(0.85, 0.65, 0.20)
+	# Base disc (square slab)
+	_add_block(root, Vector3(0.0, 0.04, 0.0), Vector3(0.45, 0.08, 0.45), wood)
+	# Pole
+	_add_block(root, Vector3(0.0, 0.90, 0.0), Vector3(0.06, 1.70, 0.06), wood)
+	# Hooks (4 around top)
+	for ang in [0.0, PI * 0.5, PI, PI * 1.5]:
+		var x: float = cos(ang) * 0.10
+		var z: float = sin(ang) * 0.10
+		_add_block(root, Vector3(x, 1.60, z), Vector3(0.06, 0.04, 0.06), brass)
+		_add_block(root, Vector3(x * 1.6, 1.50, z * 1.6), Vector3(0.04, 0.10, 0.04), brass)
+	# A draped coat on one side (visual variety)
+	_add_block(root, Vector3(0.18, 1.00, 0.0), Vector3(0.04, 0.80, 0.30), Color(0.18, 0.20, 0.30))
+	return root
+
+
+func _build_radiator() -> Node3D:
+	var root := Node3D.new()
+	var iron := Color(0.85, 0.84, 0.82)
+	# 6 vertical fins
+	for i in 6:
+		var x: float = -0.40 + i * 0.16
+		_add_block(root, Vector3(x, 0.40, 0.0), Vector3(0.10, 0.78, 0.18), iron)
+	# Top rail
+	_add_block(root, Vector3(0.0, 0.80, 0.0), Vector3(1.00, 0.05, 0.20), iron.darkened(0.1))
+	# Bottom rail
+	_add_block(root, Vector3(0.0, 0.04, 0.0), Vector3(1.00, 0.06, 0.20), iron.darkened(0.1))
+	# Valve knob
+	_add_block(root, Vector3(0.55, 0.20, 0.0), Vector3(0.04, 0.06, 0.04), Color(0.45, 0.30, 0.18))
+	return root
+
+
+func _build_bookcase() -> Node3D:
+	var root := Node3D.new()
+	var wood := Color(0.30, 0.18, 0.10)
+	var pages := Color(0.92, 0.88, 0.78)
+	# Frame: side panels + back + shelves
+	_add_block(root, Vector3(-0.45, 0.92, 0.0), Vector3(0.06, 1.84, 0.36), wood)
+	_add_block(root, Vector3( 0.45, 0.92, 0.0), Vector3(0.06, 1.84, 0.36), wood)
+	_add_block(root, Vector3(0.0, 0.04, 0.0), Vector3(0.96, 0.08, 0.36), wood)
+	_add_block(root, Vector3(0.0, 1.82, 0.0), Vector3(0.96, 0.08, 0.36), wood)
+	_add_block(root, Vector3(0.0, 0.92, -0.16), Vector3(0.96, 1.84, 0.04), wood.darkened(0.15))
+	# Three shelves of books (rows of vertical thin blocks)
+	var shelf_ys := [0.55, 1.05, 1.55]
+	var book_colors := [
+		Color(0.50, 0.20, 0.18), Color(0.20, 0.30, 0.55), Color(0.55, 0.40, 0.20),
+		Color(0.30, 0.45, 0.30), Color(0.40, 0.20, 0.40), Color(0.55, 0.55, 0.20),
+		pages,
+	]
+	for sy in shelf_ys:
+		# Shelf board
+		_add_block(root, Vector3(0.0, sy - 0.10, 0.0), Vector3(0.92, 0.04, 0.32), wood)
+		# Books standing on top of the shelf
+		for i in 9:
+			var x: float = -0.40 + i * 0.10
+			var c: Color = book_colors[(i + int(sy * 7)) % book_colors.size()]
+			_add_block(root, Vector3(x, sy + 0.18, 0.0), Vector3(0.08, 0.36, 0.20), c)
 	return root
 
 
