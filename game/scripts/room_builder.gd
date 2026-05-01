@@ -505,17 +505,21 @@ func _build_wall_curtain() -> Node3D:
 
 func _build_wall_mirror() -> Node3D:
 	var root := Node3D.new()
-	# Ornate frame in dark wood (not yellow brass)
+	# Dark wood frame (not the old yellow brass)
 	var frame_color := Color(0.30, 0.20, 0.12)
-	# Mirror surface: silvery, very smooth so it reads as a mirror.
-	# (No real reflection without a Camera/Viewport setup, but a near-white
-	# metallic surface is the visual shorthand for "mirror".)
 	_add_block(root, Vector3(0.0, 0.0, 0.0), Vector3(1.20, 1.60, 0.10), frame_color)
 
+	# Mirror surface: bright pale-blue with strong self-illumination so it
+	# reads as a luminous reflective panel even without a real reflection
+	# probe. (Metallic + low roughness alone goes dark in Forward+ when the
+	# environment is dim — you'd just see the dark background colour.)
 	var mirror_mat := StandardMaterial3D.new()
-	mirror_mat.albedo_color = Color(0.92, 0.94, 0.96)
-	mirror_mat.metallic = 0.9
-	mirror_mat.roughness = 0.05
+	mirror_mat.albedo_color = Color(0.88, 0.94, 0.98)
+	mirror_mat.roughness = 0.08
+	mirror_mat.metallic = 0.30
+	mirror_mat.emission_enabled = true
+	mirror_mat.emission = Color(0.55, 0.68, 0.78)
+	mirror_mat.emission_energy_multiplier = 1.4
 	var mirror_mesh := BoxMesh.new()
 	mirror_mesh.size = Vector3(1.00, 1.40, 0.02)
 	var mirror_mi := MeshInstance3D.new()
@@ -524,8 +528,19 @@ func _build_wall_mirror() -> Node3D:
 	mirror_mi.transform.origin = Vector3(0.0, 0.0, 0.06)
 	root.add_child(mirror_mi)
 
-	# Inner highlight strip for visual interest
-	_add_block(root, Vector3(-0.30, 0.0, 0.075), Vector3(0.04, 1.30, 0.005), Color(0.65, 0.75, 0.80))
+	# Faint vertical reflection band for visual interest
+	var band_mat := StandardMaterial3D.new()
+	band_mat.albedo_color = Color(1.0, 1.0, 1.0)
+	band_mat.emission_enabled = true
+	band_mat.emission = Color(0.85, 0.92, 0.98)
+	band_mat.emission_energy_multiplier = 1.2
+	var band_mesh := BoxMesh.new()
+	band_mesh.size = Vector3(0.06, 1.30, 0.005)
+	var band := MeshInstance3D.new()
+	band.mesh = band_mesh
+	band.set_surface_override_material(0, band_mat)
+	band.transform.origin = Vector3(-0.30, 0.0, 0.075)
+	root.add_child(band)
 	return root
 
 
@@ -806,11 +821,13 @@ func _spawn_character(
 			_add_block(rig, Vector3( 0.10, ly, hand_z_book + lz_offset), Vector3(0.12, 0.002, 0.005), Color(0.10, 0.08, 0.06))
 
 	elif act_writing:
-		# Small writing desk in front of the seat with paper, pen, inkwell.
-		var desk_top_y: float = sit_y + 0.42
-		var desk_z: float = 0.55
-		var desk_w: float = 0.85
-		var desk_d: float = 0.45
+		# Writing desk in front of the seat with paper, pen, inkwell.
+		# Size tuned for a believable manor desk — wide enough for two
+		# elbows, deep enough to lean over.
+		var desk_top_y: float = sit_y + 0.50
+		var desk_z: float = 0.65
+		var desk_w: float = 1.30
+		var desk_d: float = 0.65
 		# Top
 		_add_block(rig, Vector3(0.0, desk_top_y, desk_z), Vector3(desk_w, 0.05, desk_d), Color(0.40, 0.28, 0.18))
 		# 4 legs

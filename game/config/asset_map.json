@@ -22,8 +22,8 @@
     "default": {"asset": "furniture/cardboardBoxClosed.glb", "scale": 1.0},
     "patterns": [
       {"contains": "side table",       "asset": "furniture/sideTable.glb",         "scale": 1.0},
-      {"contains": "writing desk",     "asset": "furniture/desk.glb",              "scale": 1.0},
-      {"contains": "desk",             "asset": "furniture/desk.glb",              "scale": 1.0},
+      {"contains": "writing desk",     "asset": "furniture/desk.glb",              "scale": 1.5},
+      {"contains": "desk",             "asset": "furniture/desk.glb",              "scale": 1.5},
       {"contains": "armchair",         "asset": "furniture/loungeChair.glb",       "scale": 1.7},
       {"contains": "lounge",           "asset": "furniture/loungeSofa.glb",        "scale": 1.6},
       {"contains": "sofa",             "asset": "furniture/loungeSofa.glb",        "scale": 1.6},
