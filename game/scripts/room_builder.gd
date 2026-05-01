@@ -247,62 +247,66 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 	)
 	add_child(holder)
 
-	# Try to load a Kenney mesh first; fall back to a tinted cube on failure
-	# so the game stays playable even when no assets are installed.
-	var resolved := _resolve_asset_full("objects", label_text, "")
-	var glb := _try_instance_asset(String(resolved.get("path", "")))
+	# 1) Procedural shape for items that have no good Kenney equivalent
+	#    (cleaver, revolver, candlestick, rope, vial, poker, etc.).
+	# 2) Fall through to Kenney GLB lookup.
+	# 3) Last resort: tinted cube.
+	var procedural := _try_build_procedural_object(label_text)
 
 	var body := StaticBody3D.new()
+	body.transform.origin = Vector3(0.0, 0.0, 0.0)
 
-	if glb != null:
-		# Kenney models have their origin at the base (floor), so place the
-		# body at y=0 — adding the cube's half-height offset would lift the
-		# model off the ground.
-		body.transform.origin = Vector3(0.0, 0.0, 0.0)
-		var s: float = float(resolved.get("scale", 1.0))
-		if not is_equal_approx(s, 1.0):
-			glb.scale = Vector3(s, s, s)
-		# Try to load the sibling .png so the prop shows Kenney's natural
-		# colors. Only fall back to a flat category tint if no texture is
-		# available.
-		var asset_path := String(resolved.get("path", ""))
-		var tex := _try_load_sibling_texture(asset_path)
-		if tex != null:
-			_apply_external_texture(glb, tex)
-		else:
-			_apply_tint(glb, color)
-		body.add_child(glb)
-		# Generic AABB collider sized to the slot. Approximate per CLAUDE.md
-		# rule 11 (AABB collision, not pixel-perfect).
-		var col := CollisionShape3D.new()
-		var shape := BoxShape3D.new()
-		var col_size: float = size * max(1.0, s)
-		shape.size = Vector3(col_size, col_size, col_size)
-		col.shape = shape
-		col.transform.origin = Vector3(0.0, col_size * 0.5, 0.0)
-		body.add_child(col)
+	var visual_height: float = size * 1.2
+	var col_size: float = size
+
+	if procedural != null:
+		body.add_child(procedural)
+		col_size = 0.6
+		visual_height = 1.0
 	else:
-		body.transform.origin = Vector3(0.0, size * 0.5, 0.0)
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = color
-		mat.roughness = 0.6
-		var box := BoxMesh.new()
-		box.size = Vector3(size, size, size)
-		box.material = mat
-		var mi := MeshInstance3D.new()
-		mi.mesh = box
-		body.add_child(mi)
-		var col := CollisionShape3D.new()
-		var shape := BoxShape3D.new()
-		shape.size = Vector3(size, size, size)
-		col.shape = shape
-		body.add_child(col)
+		var resolved := _resolve_asset_full("objects", label_text, "")
+		var glb := _try_instance_asset(String(resolved.get("path", "")))
+		if glb != null:
+			var s: float = float(resolved.get("scale", 1.0))
+			if not is_equal_approx(s, 1.0):
+				glb.scale = Vector3(s, s, s)
+			var asset_path := String(resolved.get("path", ""))
+			var tex := _try_load_sibling_texture(asset_path)
+			if tex != null:
+				_apply_external_texture(glb, tex)
+			else:
+				_apply_tint(glb, color)
+			body.add_child(glb)
+			col_size = size * max(1.0, s)
+			visual_height = col_size
+		else:
+			# Cube fallback (the body offset must lift the centred mesh).
+			body.transform.origin = Vector3(0.0, size * 0.5, 0.0)
+			var mat := StandardMaterial3D.new()
+			mat.albedo_color = color
+			mat.roughness = 0.6
+			var box := BoxMesh.new()
+			box.size = Vector3(size, size, size)
+			box.material = mat
+			var mi := MeshInstance3D.new()
+			mi.mesh = box
+			body.add_child(mi)
+			col_size = size
+			visual_height = size
 
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(col_size, col_size, col_size)
+	col.shape = shape
+	# When the visual sits on the floor (procedural / GLB), centre the
+	# collider above y=0; the cube fallback already shifted the body.
+	if procedural != null or body.transform.origin == Vector3.ZERO:
+		col.transform.origin = Vector3(0.0, col_size * 0.5, 0.0)
+	body.add_child(col)
 	holder.add_child(body)
-	# Place the label clearly ABOVE the visual. Scale-aware so the label
-	# doesn't end up inside the mesh now that GLBs are scaled up substantially.
-	var s_for_label: float = float(resolved.get("scale", 1.0))
-	var label_y: float = max(size + 0.3, s_for_label * 0.6 + 0.4)
+
+	# Label clearly above the visual.
+	var label_y: float = max(visual_height + 0.4, 1.0)
 	_attach_label(holder, label_text, label_y, color)
 	return holder
 
@@ -379,7 +383,8 @@ func _spawn_character(
 		skin_color = skin_color.darkened(0.25)
 	var pants_color := Color(0.22, 0.20, 0.17)
 
-	# Dimensions in metres, scaled later via SCALE.
+	# Dimensions in metres at SCALE=1; total figure ~2.15m -> SCALE 0.85
+	# yields ~1.83m, a believable human height.
 	var HEAD: float = 0.55
 	var TORSO_W: float = 0.70
 	var TORSO_H: float = 0.85
@@ -390,7 +395,7 @@ func _spawn_character(
 	var LEG_W: float = 0.28
 	var LEG_H: float = 0.75
 	var LEG_D: float = 0.28
-	var SCALE: float = 1.6
+	var SCALE: float = 0.85
 
 	rig.scale = Vector3(SCALE, SCALE, SCALE)
 
@@ -419,13 +424,38 @@ func _spawn_character(
 	var hair_h: float = 0.10
 	_add_block(rig, Vector3(0.0, head_top + hair_h * 0.5, 0.0), Vector3(HEAD * 1.02, hair_h, HEAD * 1.02), hair_color)
 
-	# Face accents: simple eye dots so the character has a "front"
-	var eye_color := Color(0.10, 0.08, 0.07)
-	var eye_size := Vector3(0.07, 0.08, 0.05)
+	# Face: eyebrows + eyes + mouth, embedded just outside the head's front
+	# face (along +Z) so they read as a face rather than free-floating dots.
+	var dark := Color(0.08, 0.06, 0.05)
+	var face_z: float = HEAD * 0.5 + 0.005
 	var eye_y: float = torso_top + HEAD * 0.62
-	var eye_z: float = TORSO_D * 0.5 + 0.06  # poke out the front (along +Z)
-	_add_block(rig, Vector3(-0.11, eye_y, eye_z), eye_size, eye_color)
-	_add_block(rig, Vector3( 0.11, eye_y, eye_z), eye_size, eye_color)
+	var eye_white := Color(0.95, 0.92, 0.88)
+
+	# Eye whites (bigger blocks) with dark pupils on top of them
+	var eye_white_size := Vector3(0.13, 0.10, 0.02)
+	var pupil_size := Vector3(0.06, 0.06, 0.025)
+	_add_block(rig, Vector3(-0.13, eye_y, face_z), eye_white_size, eye_white)
+	_add_block(rig, Vector3( 0.13, eye_y, face_z), eye_white_size, eye_white)
+	_add_block(rig, Vector3(-0.13, eye_y, face_z + 0.01), pupil_size, dark)
+	_add_block(rig, Vector3( 0.13, eye_y, face_z + 0.01), pupil_size, dark)
+
+	# Eyebrows above the eyes
+	var brow_size := Vector3(0.16, 0.04, 0.02)
+	var brow_y: float = eye_y + 0.10
+	_add_block(rig, Vector3(-0.13, brow_y, face_z), brow_size, hair_color)
+	_add_block(rig, Vector3( 0.13, brow_y, face_z), brow_size, hair_color)
+
+	# Mouth (a horizontal slit)
+	var mouth_size := Vector3(0.18, 0.04, 0.02)
+	var mouth_y: float = eye_y - 0.18
+	if not alive:
+		# Open-mouth-looking small square for the deceased
+		mouth_size = Vector3(0.12, 0.08, 0.02)
+	_add_block(rig, Vector3(0.0, mouth_y, face_z), mouth_size, dark)
+
+	# Blood pool under the victim — a flat irregular red splash on the floor.
+	if not alive:
+		_add_blood_pool(holder)
 
 	# Collision: a single capsule covering the whole figure.
 	var col_body := StaticBody3D.new()
@@ -463,6 +493,193 @@ func _spawn_character(
 
 	_attach_label(holder, label_text, label_height, color)
 	return holder
+
+
+func _try_build_procedural_object(entity_name: String) -> Node3D:
+	# Build distinctive shapes for items the Kenney furniture pack can't
+	# represent (most weapons, plus a few clue objects). Returns null if no
+	# match — caller falls through to Kenney GLB / cube fallback.
+	var lower := entity_name.to_lower()
+	if "cleaver" in lower or "knife" in lower or "letter opener" in lower:
+		return _build_cleaver()
+	if "shears" in lower:
+		return _build_shears()
+	if "revolver" in lower or "pistol" in lower:
+		return _build_revolver()
+	if "candlestick" in lower:
+		return _build_candlestick()
+	if "decanter" in lower:
+		return _build_decanter()
+	if "vial" in lower or "poison" in lower:
+		return _build_vial()
+	if "rope" in lower:
+		return _build_rope()
+	if "poker" in lower or ("iron" in lower and "fireplace" in lower):
+		return _build_poker()
+	if "bookend" in lower:
+		return _build_bookend()
+	if "scarf" in lower:
+		return _build_scarf()
+	if "statuette" in lower:
+		return _build_statuette()
+	return null
+
+
+func _build_cleaver() -> Node3D:
+	var root := Node3D.new()
+	var wood := Color(0.45, 0.30, 0.18)
+	var blade := Color(0.85, 0.85, 0.90)
+	# Handle (lying horizontally on the ground)
+	_add_block(root, Vector3(-0.18, 0.06, 0.0), Vector3(0.32, 0.06, 0.06), wood)
+	# Wide rectangular blade
+	_add_block(root, Vector3(0.12, 0.18, 0.0), Vector3(0.40, 0.26, 0.02), blade)
+	# Edge highlight (bottom of blade)
+	_add_block(root, Vector3(0.12, 0.04, 0.0), Vector3(0.42, 0.03, 0.02), Color(0.95, 0.95, 0.98))
+	return root
+
+
+func _build_shears() -> Node3D:
+	var root := Node3D.new()
+	var metal := Color(0.65, 0.65, 0.70)
+	var wood := Color(0.45, 0.30, 0.18)
+	# Two slightly-open blades
+	_add_block(root, Vector3(0.0, 0.40, 0.05), Vector3(0.06, 0.40, 0.04), metal)
+	_add_block(root, Vector3(0.0, 0.40, -0.05), Vector3(0.06, 0.40, 0.04), metal)
+	# Pivot
+	_add_block(root, Vector3(0.0, 0.20, 0.0), Vector3(0.10, 0.06, 0.10), metal)
+	# Handle loops
+	_add_block(root, Vector3(0.0, 0.10, 0.12), Vector3(0.06, 0.20, 0.05), wood)
+	_add_block(root, Vector3(0.0, 0.10, -0.12), Vector3(0.06, 0.20, 0.05), wood)
+	return root
+
+
+func _build_revolver() -> Node3D:
+	var root := Node3D.new()
+	var metal := Color(0.28, 0.28, 0.32)
+	var wood := Color(0.45, 0.30, 0.18)
+	# Barrel
+	_add_block(root, Vector3(0.16, 0.30, 0.0), Vector3(0.32, 0.06, 0.06), metal)
+	# Cylinder
+	_add_block(root, Vector3(0.0, 0.30, 0.0), Vector3(0.10, 0.12, 0.12), metal)
+	# Handle (angled grip)
+	_add_block(root, Vector3(-0.10, 0.18, 0.0), Vector3(0.06, 0.22, 0.05), wood)
+	# Trigger guard
+	_add_block(root, Vector3(-0.04, 0.22, 0.0), Vector3(0.06, 0.04, 0.06), metal)
+	return root
+
+
+func _build_candlestick() -> Node3D:
+	var root := Node3D.new()
+	var brass := Color(0.85, 0.65, 0.20)
+	var wax := Color(0.95, 0.92, 0.85)
+	var flame := Color(1.0, 0.75, 0.20)
+	_add_block(root, Vector3(0.0, 0.025, 0.0), Vector3(0.20, 0.05, 0.20), brass)
+	_add_block(root, Vector3(0.0, 0.45, 0.0), Vector3(0.06, 0.80, 0.06), brass)
+	_add_block(root, Vector3(0.0, 0.90, 0.0), Vector3(0.16, 0.06, 0.16), brass)
+	_add_block(root, Vector3(0.0, 1.05, 0.0), Vector3(0.06, 0.20, 0.06), wax)
+	_add_block(root, Vector3(0.0, 1.20, 0.0), Vector3(0.05, 0.10, 0.05), flame)
+	return root
+
+
+func _build_decanter() -> Node3D:
+	var root := Node3D.new()
+	var glass := Color(0.85, 0.92, 0.95)
+	var wine := Color(0.45, 0.10, 0.18)
+	_add_block(root, Vector3(0.0, 0.20, 0.0), Vector3(0.22, 0.40, 0.22), glass)
+	_add_block(root, Vector3(0.0, 0.18, 0.0), Vector3(0.18, 0.30, 0.18), wine)
+	# Neck
+	_add_block(root, Vector3(0.0, 0.50, 0.0), Vector3(0.08, 0.20, 0.08), glass)
+	# Stopper
+	_add_block(root, Vector3(0.0, 0.62, 0.0), Vector3(0.10, 0.05, 0.10), Color(0.75, 0.55, 0.30))
+	return root
+
+
+func _build_vial() -> Node3D:
+	var root := Node3D.new()
+	var glass := Color(0.85, 0.92, 0.95)
+	var poison := Color(0.20, 0.65, 0.20)
+	_add_block(root, Vector3(0.0, 0.18, 0.0), Vector3(0.10, 0.36, 0.10), glass)
+	_add_block(root, Vector3(0.0, 0.14, 0.0), Vector3(0.07, 0.22, 0.07), poison)
+	# Cork
+	_add_block(root, Vector3(0.0, 0.38, 0.0), Vector3(0.08, 0.06, 0.08), Color(0.55, 0.42, 0.25))
+	return root
+
+
+func _build_rope() -> Node3D:
+	var root := Node3D.new()
+	var rope := Color(0.55, 0.40, 0.22)
+	# Coiled rope (overlapping flat rings)
+	for i in 5:
+		var y: float = 0.04 + i * 0.07
+		_add_block(root, Vector3(0.0, y, 0.0), Vector3(0.36, 0.07, 0.36), rope)
+	# Hollow centre is implicit (we don't poke through it; it's "minecraft" enough)
+	return root
+
+
+func _build_poker() -> Node3D:
+	var root := Node3D.new()
+	var iron := Color(0.20, 0.20, 0.22)
+	var brass := Color(0.85, 0.65, 0.20)
+	# Long thin rod standing up
+	_add_block(root, Vector3(0.0, 0.50, 0.0), Vector3(0.04, 1.00, 0.04), iron)
+	# Brass handle cap
+	_add_block(root, Vector3(0.0, 1.05, 0.0), Vector3(0.06, 0.10, 0.06), brass)
+	# Hooked tip at the base (bent)
+	_add_block(root, Vector3(0.05, 0.04, 0.0), Vector3(0.12, 0.04, 0.04), iron)
+	return root
+
+
+func _build_bookend() -> Node3D:
+	var root := Node3D.new()
+	var stone := Color(0.85, 0.85, 0.82)
+	var leather := Color(0.45, 0.20, 0.15)
+	var pages := Color(0.92, 0.88, 0.78)
+	# Marble base (the bookend itself)
+	_add_block(root, Vector3(0.0, 0.10, 0.0), Vector3(0.40, 0.20, 0.16), stone)
+	# Vertical brace
+	_add_block(root, Vector3(-0.18, 0.30, 0.0), Vector3(0.04, 0.30, 0.16), stone)
+	# Two leaning books
+	_add_block(root, Vector3(-0.10, 0.30, 0.0), Vector3(0.06, 0.30, 0.14), leather)
+	_add_block(root, Vector3(-0.04, 0.30, 0.0), Vector3(0.06, 0.28, 0.14), Color(0.20, 0.30, 0.55))
+	_add_block(root, Vector3( 0.04, 0.28, 0.0), Vector3(0.06, 0.26, 0.14), pages)
+	return root
+
+
+func _build_scarf() -> Node3D:
+	var root := Node3D.new()
+	var silk := Color(0.30, 0.20, 0.55)
+	# A long crumpled cloth on the floor
+	_add_block(root, Vector3(0.0, 0.04, 0.0), Vector3(0.80, 0.04, 0.30), silk)
+	_add_block(root, Vector3(-0.30, 0.06, 0.10), Vector3(0.20, 0.06, 0.20), silk)
+	return root
+
+
+func _build_statuette() -> Node3D:
+	var root := Node3D.new()
+	var bronze := Color(0.55, 0.35, 0.15)
+	# Pedestal
+	_add_block(root, Vector3(0.0, 0.05, 0.0), Vector3(0.20, 0.10, 0.20), bronze.darkened(0.2))
+	# Body
+	_add_block(root, Vector3(0.0, 0.30, 0.0), Vector3(0.10, 0.30, 0.10), bronze)
+	# Head
+	_add_block(root, Vector3(0.0, 0.52, 0.0), Vector3(0.10, 0.10, 0.10), bronze)
+	return root
+
+
+func _add_blood_pool(parent: Node3D) -> void:
+	# Stack a few overlapping flat planes to suggest a splash shape rather
+	# than a single sterile rectangle. Slightly above floor (y=0.005) to
+	# avoid z-fighting with the room floor mesh.
+	var blood_color := Color(0.55, 0.05, 0.05)
+	var blood_dark := Color(0.35, 0.03, 0.03)
+	var slabs := [
+		{"pos": Vector3(0.0, 0.005, 0.0),  "size": Vector3(2.4, 0.01, 1.4), "c": blood_color},
+		{"pos": Vector3(0.7, 0.006, 0.4),  "size": Vector3(1.0, 0.01, 0.6), "c": blood_color},
+		{"pos": Vector3(-0.6, 0.006, -0.5),"size": Vector3(0.9, 0.01, 0.7), "c": blood_color},
+		{"pos": Vector3(0.0, 0.007, 0.0),  "size": Vector3(1.2, 0.01, 0.7), "c": blood_dark},
+	]
+	for s in slabs:
+		_add_block(parent, s["pos"], s["size"], s["c"])
 
 
 func _add_block(parent: Node3D, pos: Vector3, size: Vector3, color: Color) -> void:
