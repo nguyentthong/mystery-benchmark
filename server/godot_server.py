@@ -623,6 +623,34 @@ class GodotServer:
             elif msg_type == "case_file":
                 await ws.send(json.dumps(self._case_file_payload(request_id)))
 
+            elif msg_type == "talk_history":
+                char_name = str(msg.get("character_name", ""))
+                char = next(
+                    (c for c in self.env.state.characters.values()
+                     if c.full_name.lower() == char_name.lower()),
+                    None,
+                )
+                history: list[dict[str, str]] = []
+                if char:
+                    raw = self.env._interview_histories.get(char.id, [])
+                    for turn in raw:
+                        history.append(
+                            {
+                                "role": str(turn.get("role", "")),
+                                "content": str(turn.get("content", "")),
+                            }
+                        )
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "talk_history",
+                            "request_id": request_id,
+                            "character_name": char_name,
+                            "history": history,
+                        }
+                    )
+                )
+
             elif msg_type == "new_game":
                 # Regenerate the world with the parameters from Godot's
                 # start form. seed=0 / missing -> randomise.

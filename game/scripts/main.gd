@@ -151,6 +151,11 @@ func _on_message(msg: Dictionary) -> void:
 			_apply_accusation_result(msg)
 		"world_graph":
 			_hud.update_world_graph(msg.get("locations", []))
+		"talk_history":
+			_hud.populate_chat_history(
+				String(msg.get("character_name", "")),
+				msg.get("history", []),
+			)
 		"error":
 			push_error("server error: " + str(msg.get("error", "")))
 			_hud.set_status("Server error: " + str(msg.get("error", "")))
@@ -343,6 +348,14 @@ func _try_interact() -> void:
 		_pending_action = "talk"
 		_set_modal_active(true)
 		_hud.open_chat(nm)
+		# Pull any previous interview turns so the player can reread the
+		# conversation rather than starting fresh each time they reopen
+		# the chat.
+		_ws.send_json({
+			"type": "talk_history",
+			"request_id": _next_rid("hist"),
+			"character_name": nm,
+		})
 
 
 func _request_inventory() -> void:

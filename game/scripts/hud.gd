@@ -328,6 +328,32 @@ func append_chat_response(text: String) -> void:
 	_chat_input.grab_focus()
 
 
+func populate_chat_history(character_name: String, history: Array) -> void:
+	# Replays the prior interview turns into the chat panel so the player
+	# can read what they already asked. Called when the chat panel opens.
+	if _chat_panel == null or not _chat_panel.visible:
+		return
+	if character_name.to_lower() != _chat_character_name.to_lower():
+		return
+	if history.is_empty():
+		_chat_history.text = "(No previous interview. Type a question below.)"
+		return
+	var lines: PackedStringArray = []
+	lines.append("--- Previous interview ---")
+	for turn in history:
+		var role := String(turn.get("role", ""))
+		var content := String(turn.get("content", ""))
+		if role == "user":
+			lines.append("[You] %s" % content)
+		elif role == "assistant":
+			lines.append("[%s] %s" % [character_name, content])
+		else:
+			lines.append(content)
+	lines.append("")
+	lines.append("--- Continue below ---")
+	_chat_history.text = "\n".join(lines)
+
+
 func is_chat_open() -> bool:
 	return _chat_panel != null and _chat_panel.visible
 
