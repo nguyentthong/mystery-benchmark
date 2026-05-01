@@ -312,6 +312,132 @@ class GodotServer:
             **room,
         }
 
+    def _solution_text(self) -> str:
+        """End-of-game reveal text. Mirrors the 2D version's solution screen
+        so the player gets the full picture after they accuse."""
+        env = self.env
+        state = env.state
+        summary = env.get_episode_summary()
+        score = (summary.get("score_result") or {}) or {}
+        composite = float(score.get("composite_score", 0.0) or 0.0)
+
+        culprit = state.get_culprit()
+        weapon = state.objects.get(state.murder_weapon_id)
+        room = state.locations.get(state.murder_location_id)
+        victim = state.characters.get(state.victim_id)
+
+        culprit_name = culprit.full_name if culprit else "the killer"
+        weapon_name = weapon.name if weapon else "an unknown weapon"
+        room_name = room.name if room else "an unknown room"
+        victim_name = victim.full_name if victim else "the victim"
+
+        lines: list[str] = []
+
+        if env.is_solved and summary.get("accusation_correct"):
+            lines.append("CASE CLOSED")
+            lines.append("You caught the killer.")
+        elif env.is_solved:
+            lines.append("CASE FAILED")
+            lines.append("Your accusation was wrong. The real killer walks free.")
+        else:
+            lines.append("TIME RAN OUT")
+            lines.append("You ran out of time before naming a suspect.")
+        lines.append("")
+
+        lines.append(f"It was {culprit_name},")
+        lines.append(f"in the {room_name},")
+        lines.append(f"with the {weapon_name}.")
+        lines.append("")
+
+        lines.append("WHY?")
+        lines.append("-" * 24)
+        if culprit and culprit.motive:
+            lines.append(f"{culprit_name} was driven by {culprit.motive}.")
+        else:
+            lines.append(
+                f"The motive remains murky -- but the evidence places "
+                f"{culprit_name} at the scene."
+            )
+        lines.append("")
+
+        lines.append("HOW THEY TRIED TO COVER IT UP")
+        lines.append("-" * 30)
+        if culprit and culprit.alibi_claims:
+            claim = culprit.alibi_claims[0]
+            lines.append(
+                f"{culprit_name} claimed to be at the {claim.location_name} "
+                f"at {claim.clock_time_str}."
+            )
+            corr_id = getattr(culprit, "alibi_corroborator_id", None)
+            if corr_id:
+                corr = state.characters.get(corr_id)
+                corr_name = corr.full_name if corr else "someone"
+                if culprit.alibi_corroboration_is_genuine:
+                    lines.append(
+                        f"{corr_name} backed up the story -- but {corr_name}'s "
+                        f"account didn't square with the physical evidence."
+                    )
+                else:
+                    lines.append(
+                        f"{corr_name} backed up the story -- but {corr_name} was "
+                        f"lying for them. A house of cards."
+                    )
+            else:
+                lines.append("No one could back up the story. A flimsy alibi at best.")
+            lines.append(
+                f"While the alibi pointed to the {claim.location_name}, the evidence "
+                f"placed {culprit_name} firmly in the {room_name} when "
+                f"{victim_name} died."
+            )
+        else:
+            lines.append(f"{culprit_name} offered no alibi -- and the evidence wasn't kind.")
+        lines.append("")
+
+        lines.append("YOUR DETECTIVE WORK")
+        lines.append("-" * 21)
+        n_found = len(summary.get("evidence_discovered", []))
+        n_total = sum(
+            1 for ev in state.evidence.values()
+            if not getattr(ev, "is_red_herring", False)
+        )
+        n_intv = len(summary.get("characters_interviewed", []))
+        n_suspects = sum(
+            1 for c in state.characters.values()
+            if CharacterRole.SUSPECT in c.roles
+        )
+        actions_used = summary.get("actions_taken", "?")
+        budget = summary.get("budget", "?")
+        lines.append(f"Evidence found:        {n_found} / {n_total}")
+        lines.append(f"Suspects interviewed:  {n_intv} / {n_suspects}")
+        lines.append(f"Actions used:          {actions_used} / {budget}")
+        if score:
+            lines.append(
+                f"Innocents cleared:     "
+                f"{score.get('correct_eliminations', 0)} / "
+                f"{score.get('total_innocents', 0)}"
+            )
+        lines.append("")
+
+        if score:
+            lines.append("THE NUMBERS  (for the curious)")
+            lines.append("-" * 30)
+            lines.append(f"Composite score:        {composite:.3f}")
+            lines.append(
+                f"Accusation:             {score.get('accusation_score', 0):.2f}  "
+                f"suspect={int(score.get('correct_suspect', 0))}  "
+                f"weapon={int(score.get('correct_weapon', 0))}  "
+                f"room={int(score.get('correct_room', 0))}"
+            )
+            lines.append(f"Locard triangle:")
+            lines.append(f"  suspect <-> weapon  F1 = {score.get('suspect_weapon_score', 0):.2f}")
+            lines.append(f"  weapon  <-> victim  F1 = {score.get('weapon_victim_score', 0):.2f}")
+            lines.append(f"  suspect <-> room    F1 = {score.get('suspect_room_score', 0):.2f}")
+            lines.append(f"Alibi consistency:      {score.get('alibi_score', 0):.2f}")
+            lines.append(f"Innocent eliminations:  {score.get('elimination_score', 0):.2f}")
+
+        return "\n".join(lines)
+
+
     def _case_file_payload(self, request_id: str) -> dict[str, Any]:
         state = self.env.state
         victim = state.characters.get(state.victim_id)
@@ -478,6 +604,8 @@ class GodotServer:
                     "correct": bool(self.env.accusation_correct),
                     "observation": result.observation,
                     "details": result.details or {},
+                    "solution_text": self._solution_text(),
+                    **self._status(),
                 }
                 await ws.send(json.dumps(payload))
 

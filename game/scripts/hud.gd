@@ -462,28 +462,34 @@ func close_accuse() -> void:
 
 func _build_accusation_result_panel() -> void:
 	_result_modal_panel = _make_modal_root()
-	var v := _make_modal_box(_result_modal_panel, Vector2(760, 380))
+	var v := _make_modal_box(_result_modal_panel, Vector2(960, 640))
 
 	_result_modal_text = _make_richtext()
-	_result_modal_text.custom_minimum_size = Vector2(0, 280)
+	_result_modal_text.scroll_following = false
+	_result_modal_text.custom_minimum_size = Vector2(0, 540)
 	v.add_child(_result_modal_text)
 
-	v.add_child(_make_hint("[ESC] to dismiss (game is over)"))
+	v.add_child(_make_hint("[ESC] to dismiss (game is over). Scroll for the full reveal."))
 
 	_result_modal_panel.visible = false
 	add_child(_result_modal_panel)
 
 
-func show_accusation_result(correct: bool, observation: String, details: Dictionary) -> void:
+func show_accusation_result(correct: bool, observation: String, details: Dictionary, solution_text: String = "") -> void:
 	hide_all_modals()
-	var verdict := ("CORRECT" if correct else "INCORRECT") + " accusation"
 	var lines: PackedStringArray = []
-	lines.append(verdict)
-	lines.append("")
-	lines.append(observation)
-	if details.has("partial_score"):
+	if solution_text != "":
+		# Server-built reveal screen (mirrors the 2D solution screen).
+		lines.append(solution_text)
+	else:
+		# Fallback if the server didn't supply solution_text.
+		var verdict := ("CORRECT" if correct else "INCORRECT") + " accusation"
+		lines.append(verdict)
 		lines.append("")
-		lines.append("Partial score: %.2f / 1.00" % float(details["partial_score"]))
+		lines.append(observation)
+		if details.has("partial_score"):
+			lines.append("")
+			lines.append("Partial score: %.2f / 1.00" % float(details["partial_score"]))
 	_result_modal_text.text = "\n".join(lines)
 	_result_modal_panel.visible = true
 

@@ -394,6 +394,7 @@ func _apply_accusation_result(msg: Dictionary) -> void:
 		bool(msg.get("correct", false)),
 		String(msg.get("observation", "")),
 		msg.get("details", {}),
+		String(msg.get("solution_text", "")),
 	)
 	_set_modal_active(true)
 	_game_over = true  # next dismissal of this panel quits the app

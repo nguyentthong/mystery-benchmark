@@ -620,6 +620,10 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 			body.add_child(glb)
 			col_size = size * max(1.0, s)
 			visual_height = col_size
+			# If this prop is a table or desk, dress it up: pair it with a
+			# small wooden chair beside it and put a decorative book on top.
+			# Pure visual flair — no impact on world state.
+			_decorate_table_if_applicable(holder, label_text, s)
 		else:
 			# Cube fallback (the body offset must lift the centred mesh).
 			body.transform.origin = Vector3(0.0, size * 0.5, 0.0)
@@ -999,6 +1003,88 @@ func _spawn_character(
 		label_tint = color  # red for victim/body
 	_attach_label(holder, label_text, label_height, label_tint)
 	return holder
+
+
+func _decorate_table_if_applicable(holder: Node3D, entity_name: String, kenney_scale: float) -> void:
+	# If this prop is a table/desk, add a side chair next to it and a book
+	# on top so it looks lived-in. Kept conservative so we don't pile too
+	# much on small side-tables.
+	var lower := entity_name.to_lower()
+	var is_table: bool = false
+	var top_y: float = 0.55  # estimated table-top height for typical Kenney pieces
+	if "side table" in lower:
+		is_table = true
+		top_y = 0.55 * kenney_scale
+	elif "writing desk" in lower or "desk" in lower:
+		is_table = true
+		top_y = 0.75 * kenney_scale
+	elif "table" in lower:
+		is_table = true
+		top_y = 0.55 * kenney_scale
+	if not is_table:
+		return
+
+	# Side chair, placed to the table's right (player faces it from the +Z
+	# side, i.e. front of the table).
+	var chair_offset := Vector3(0.85 * kenney_scale, 0.0, 0.10)
+	var chair := _build_table_side_chair()
+	chair.transform.origin = chair_offset
+	chair.rotation.y = -PI * 0.5  # face the table
+	holder.add_child(chair)
+
+	# A book on top of the table (purely decorative; not interactable).
+	var book := _build_book()
+	book.transform.origin = Vector3(-0.15 * kenney_scale, top_y, 0.05 * kenney_scale)
+	book.rotation.y = deg_to_rad(15.0)
+	holder.add_child(book)
+
+	# A candle holder on the other side of the table.
+	var candle := _build_small_candle()
+	candle.transform.origin = Vector3(0.20 * kenney_scale, top_y, -0.05 * kenney_scale)
+	holder.add_child(candle)
+
+
+func _build_table_side_chair() -> Node3D:
+	# Slim wooden side chair facing -Z (i.e. its front is on local -Z;
+	# rotated by the caller to face the table).
+	var root := Node3D.new()
+	var wood := Color(0.30, 0.20, 0.12)
+	var seat := 0.40
+	var seat_y := 0.42
+	# Seat
+	_add_block(root, Vector3(0.0, seat_y, 0.0), Vector3(seat, 0.05, seat), wood)
+	# Four legs
+	for sx in [-1, 1]:
+		for sz in [-1, 1]:
+			_add_block(root, Vector3(sx * (seat * 0.5 - 0.04), seat_y * 0.5, sz * (seat * 0.5 - 0.04)), Vector3(0.04, seat_y, 0.04), wood)
+	# Backrest behind the seat (rig-local -Z)
+	_add_block(root, Vector3(0.0, seat_y + 0.30, -seat * 0.5 + 0.03), Vector3(seat, 0.60, 0.04), wood.darkened(0.05))
+	return root
+
+
+func _build_small_candle() -> Node3D:
+	var root := Node3D.new()
+	var brass := Color(0.85, 0.65, 0.20)
+	var wax := Color(0.95, 0.92, 0.85)
+	var flame := Color(1.0, 0.65, 0.20)
+	# Saucer base
+	_add_block(root, Vector3(0.0, 0.012, 0.0), Vector3(0.10, 0.025, 0.10), brass)
+	# Candle wax stick
+	_add_block(root, Vector3(0.0, 0.10, 0.0), Vector3(0.04, 0.16, 0.04), wax)
+	# Tiny flame
+	var flame_mat := StandardMaterial3D.new()
+	flame_mat.albedo_color = flame
+	flame_mat.emission_enabled = true
+	flame_mat.emission = Color(1.0, 0.7, 0.30)
+	flame_mat.emission_energy_multiplier = 1.5
+	var flame_box := BoxMesh.new()
+	flame_box.size = Vector3(0.025, 0.06, 0.025)
+	var flame_mi := MeshInstance3D.new()
+	flame_mi.mesh = flame_box
+	flame_mi.set_surface_override_material(0, flame_mat)
+	flame_mi.transform.origin = Vector3(0.0, 0.21, 0.0)
+	root.add_child(flame_mi)
+	return root
 
 
 func _try_build_procedural_object(entity_name: String) -> Dictionary:
