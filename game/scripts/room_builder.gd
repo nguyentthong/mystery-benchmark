@@ -299,7 +299,11 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 		body.add_child(col)
 
 	holder.add_child(body)
-	_attach_label(holder, label_text, size + 0.3, color)
+	# Place the label clearly ABOVE the visual. Scale-aware so the label
+	# doesn't end up inside the mesh now that GLBs are scaled up substantially.
+	var s_for_label: float = float(resolved.get("scale", 1.0))
+	var label_y: float = max(size + 0.3, s_for_label * 0.6 + 0.4)
+	_attach_label(holder, label_text, label_y, color)
 	return holder
 
 
@@ -351,8 +355,9 @@ func _spawn_character(
 	var body := StaticBody3D.new()
 
 	var label_prefix := ""
-	var label_height: float = 2.1
 	var glb_path_present := glb != null
+	var s_for_label: float = float(resolved.get("scale", 1.0))
+	var label_height: float = max(2.1, s_for_label * 1.0 + 0.4)
 
 	if alive:
 		# Kenney character models have origin at the FEET; place body at y=0.
@@ -371,24 +376,24 @@ func _spawn_character(
 			body.transform.origin = Vector3(0.0, 0.35, 0.0)
 		body.rotation = Vector3(0.0, 0.0, deg_to_rad(90.0))
 		label_prefix = "[BODY] "
-		label_height = 1.2
+		label_height = max(1.0, s_for_label * 0.5 + 0.4)
 
 	if glb != null:
 		var s: float = float(resolved.get("scale", 1.0))
 		if not is_equal_approx(s, 1.0):
 			glb.scale = Vector3(s, s, s)
-		# Characters: keep Kenney's natural skin / clothing. Try to load the
-		# sibling .png as the surface texture; if that fails, leave the GLB's
-		# embedded materials alone. The role colour stays only on the label.
-		var asset_path := String(resolved.get("path", ""))
-		var tex := _try_load_sibling_texture(asset_path)
-		if tex != null:
-			_apply_external_texture(glb, tex)
+		# Characters: do NOT apply a tint or texture override. Kenney's
+		# embedded materials are designed for these specific UVs; forcing a
+		# different texture sampled the wrong way produces unpleasant solid
+		# greens. Role identity is conveyed by the floating colour-coded
+		# label, not by the body colour.
 		body.add_child(glb)
 	else:
+		# Capsule fallback for missing meshes — apply a neutral skin tone so
+		# fallback bodies don't look like role-coloured ghosts either.
 		var mat := StandardMaterial3D.new()
-		mat.albedo_color = color
-		mat.roughness = 0.7
+		mat.albedo_color = Color(0.95, 0.78, 0.65)
+		mat.roughness = 0.75
 		var visual := MeshInstance3D.new()
 		var capsule := CapsuleMesh.new()
 		capsule.radius = 0.35
