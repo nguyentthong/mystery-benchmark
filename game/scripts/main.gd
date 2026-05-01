@@ -193,9 +193,12 @@ func _on_focus_changed(info: Dictionary) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if not (event is InputEventKey) or not event.pressed or event.echo:
+	if not (event is InputEventKey):
 		return
-	var key := event.keycode
+	var key_event := event as InputEventKey
+	if not key_event.pressed or key_event.echo:
+		return
+	var key: int = key_event.keycode
 
 	# When a typing modal is open, only ESC is intercepted globally — let the
 	# LineEdit consume everything else.
@@ -303,7 +306,7 @@ func _on_accusation_submitted(suspect: String, weapon: String, location: String)
 func _apply_action_result(msg: Dictionary) -> void:
 	_hud.set_status("")
 	var observation := String(msg.get("observation", ""))
-	var evidence := msg.get("evidence_found", [])
+	var evidence: Array = msg.get("evidence_found", [])
 	if _pending_action == "talk":
 		_hud.append_chat_response(observation)
 	else:
