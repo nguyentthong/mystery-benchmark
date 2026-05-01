@@ -48,6 +48,12 @@ const ASSET_MAP_PATH := "res://config/asset_map.json"
 var _asset_map: Dictionary = {}
 var _asset_map_loaded: bool = false
 
+# Room dimensions remembered from the most recent build_from(), so prop
+# placement helpers can compute orientations relative to the room centre.
+var _room_w: int = 0
+var _room_h: int = 0
+var _room_tile_m: float = 1.0
+
 
 func build_from(room: Dictionary, tile_m: float) -> void:
 	# Clear previous geometry (transitions reuse the same RoomBuilder node).
@@ -61,6 +67,10 @@ func build_from(room: Dictionary, tile_m: float) -> void:
 	if width == 0 or height == 0 or tiles.is_empty():
 		push_error("room_builder: empty room payload")
 		return
+
+	_room_w = width
+	_room_h = height
+	_room_tile_m = tile_m
 
 	_load_asset_map()
 
@@ -625,12 +635,21 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 			else:
 				_apply_tint(glb, color)
 			body.add_child(glb)
-			col_size = size * max(1.0, s)
-			visual_height = col_size
-			# If this prop is a table or desk, dress it up: pair it with a
-			# small wooden chair beside it and put a decorative book on top.
-			# Pure visual flair — no impact on world state.
-			_decorate_table_if_applicable(holder, label_text, s)
+			# Compute the actual visual top of the GLB so labels and any
+			# decorations sit at the right height, regardless of which
+			# Kenney mesh got loaded.
+			var aabb := _compute_glb_aabb(glb)
+			var glb_top: float = aabb.position.y + aabb.size.y if aabb.size != Vector3.ZERO else size * s
+			visual_height = max(glb_top, size * s)
+			col_size = max(0.4, min(1.4, glb_top))
+			# If this prop is a table or desk, dress it up using the
+			# computed table top.
+			_decorate_table_if_applicable(holder, label_text, s, glb_top)
+			# Furniture with a clear "front" should face the room centre
+			# (so armchairs / sofas / chairs don't end up pointing at a
+			# wall after random tile placement).
+			if _is_face_inward_furniture(label_text):
+				holder.rotation.y = _yaw_to_room_center(tx, ty)
 		else:
 			# Cube fallback (the body offset must lift the centred mesh).
 			body.transform.origin = Vector3(0.0, size * 0.5, 0.0)
@@ -658,7 +677,7 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 	holder.add_child(body)
 
 	# Label sits just above the visual (visual_height was set per-asset).
-	var label_y: float = visual_height + 0.30
+	var label_y: float = visual_height + 0.50
 	_attach_label(holder, label_text, label_y, color)
 	return holder
 
@@ -1012,43 +1031,102 @@ func _spawn_character(
 	return holder
 
 
-func _decorate_table_if_applicable(holder: Node3D, entity_name: String, kenney_scale: float) -> void:
-	# If this prop is a table/desk, add a side chair next to it and a book
-	# on top so it looks lived-in. Kept conservative so we don't pile too
-	# much on small side-tables.
+func _compute_glb_aabb(root: Node3D) -> AABB:
+	# Walk the (in-memory, not-yet-added-to-tree) scene and accumulate the
+	# AABB of every MeshInstance3D, transformed by the cumulative local
+	# transform from the root. Returns an empty AABB if the tree contains
+	# no meshes.
+	var aabb := AABB()
+	var has_any := false
+	var stack: Array = [{"node": root, "xform": Transform3D.IDENTITY}]
+	while not stack.is_empty():
+		var entry: Dictionary = stack.pop_back()
+		var n: Node = entry["node"]
+		var parent_xform: Transform3D = entry["xform"]
+		var local_xform: Transform3D = parent_xform
+		if n is Node3D:
+			local_xform = parent_xform * (n as Node3D).transform
+		if n is MeshInstance3D:
+			var mi := n as MeshInstance3D
+			if mi.mesh != null:
+				var mesh_aabb: AABB = mi.mesh.get_aabb()
+				var transformed := local_xform * mesh_aabb
+				if has_any:
+					aabb = aabb.merge(transformed)
+				else:
+					aabb = transformed
+					has_any = true
+		for child in n.get_children():
+			stack.push_back({"node": child, "xform": local_xform})
+	return aabb
+
+
+func _yaw_to_room_center(tx: int, ty: int) -> float:
+	# Yaw (rotation.y) such that the holder's local +Z points from the
+	# tile toward the room centre. Used so chairs / sofas / armchairs
+	# place themselves facing inward instead of into a wall.
+	var cx: float = _room_w * 0.5 - 0.5
+	var cy: float = _room_h * 0.5 - 0.5
+	var dx: float = cx - float(tx)
+	var dz: float = cy - float(ty)
+	if absf(dx) < 0.001 and absf(dz) < 0.001:
+		return 0.0
+	return atan2(dx, dz)
+
+
+func _is_face_inward_furniture(entity_name: String) -> bool:
+	var lower := entity_name.to_lower()
+	for needle in ["armchair", "lounge", "sofa", "chair"]:
+		if needle in lower:
+			return true
+	return false
+
+
+func _decorate_table_if_applicable(holder: Node3D, entity_name: String, kenney_scale: float, table_top_y: float) -> void:
+	# Pair tables and desks with a wooden chair pulled up in front and a
+	# small set of decorations on the surface. table_top_y is the actual
+	# Y of the mesh top (computed via AABB of the loaded GLB) so books,
+	# candles, etc. sit on the surface instead of hovering above or
+	# clipping into it.
 	var lower := entity_name.to_lower()
 	var is_table: bool = false
-	var top_y: float = 0.55  # estimated table-top height for typical Kenney pieces
-	if "side table" in lower:
+	var is_desk: bool = false
+	if "writing desk" in lower or "desk" in lower:
 		is_table = true
-		top_y = 0.55 * kenney_scale
-	elif "writing desk" in lower or "desk" in lower:
+		is_desk = true
+	elif "side table" in lower or "table" in lower:
 		is_table = true
-		top_y = 0.75 * kenney_scale
-	elif "table" in lower:
-		is_table = true
-		top_y = 0.55 * kenney_scale
 	if not is_table:
 		return
 
-	# Side chair, placed to the table's right (player faces it from the +Z
-	# side, i.e. front of the table).
-	var chair_offset := Vector3(0.85 * kenney_scale, 0.0, 0.10)
+	# Place the chair directly in front of the desk, centred (not off to
+	# one side). The chair is built with its backrest on -Z, so it faces
+	# +Z by default. Rotate by π so it faces -Z (toward the table).
 	var chair := _build_table_side_chair()
-	chair.transform.origin = chair_offset
-	chair.rotation.y = -PI * 0.5  # face the table
+	# Distance the chair's back edge from the table front so the seat
+	# tucks just under it.
+	var chair_distance: float = (0.55 if is_desk else 0.40) * kenney_scale + 0.10
+	chair.transform.origin = Vector3(0.0, 0.0, chair_distance)
+	chair.rotation.y = PI
 	holder.add_child(chair)
 
-	# A book on top of the table (purely decorative; not interactable).
+	# Decorations on top — only when there's enough room (skip side tables
+	# unless they're large enough to host more than a candle).
+	var decor_y: float = max(table_top_y, 0.3)
+	# A book lying flat
 	var book := _build_book()
-	book.transform.origin = Vector3(-0.15 * kenney_scale, top_y, 0.05 * kenney_scale)
+	book.transform.origin = Vector3(-0.15 * kenney_scale, decor_y, 0.05 * kenney_scale)
 	book.rotation.y = deg_to_rad(15.0)
 	holder.add_child(book)
-
-	# A candle holder on the other side of the table.
+	# A small lit candle
 	var candle := _build_small_candle()
-	candle.transform.origin = Vector3(0.20 * kenney_scale, top_y, -0.05 * kenney_scale)
+	candle.transform.origin = Vector3(0.20 * kenney_scale, decor_y, -0.05 * kenney_scale)
 	holder.add_child(candle)
+	# Desks get an extra decoration: an inkwell
+	if is_desk:
+		var ink := _build_inkbottle()
+		ink.transform.origin = Vector3(0.30 * kenney_scale, decor_y, 0.18 * kenney_scale)
+		holder.add_child(ink)
 
 
 func _build_table_side_chair() -> Node3D:
