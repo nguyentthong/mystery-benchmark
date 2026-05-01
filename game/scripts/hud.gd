@@ -156,7 +156,7 @@ func update_focused_entity(info: Dictionary) -> void:
 		if alive:
 			_hover_label.text = "[E] Talk to %s" % entity_name
 		else:
-			_hover_label.text = "[BODY] %s" % entity_name
+			_hover_label.text = "[E] The body of %s" % entity_name
 	else:
 		_hover_label.text = ""
 

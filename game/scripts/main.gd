@@ -328,10 +328,17 @@ func _try_interact() -> void:
 	elif kind == "character":
 		var alive: bool = bool(_focused_entity.get("alive", true))
 		if not alive:
-			# Looking at a body — show a flavor blurb (no server round-trip).
+			# The "body of X" WorldObject often isn't in
+			# location.objects_here (room hits max_objects_per_room
+			# first), so env.step(EXAMINE_OBJECT, ...) fails to find
+			# it. Show a flavor blurb instead — the case file (key C)
+			# also names the victim and body location.
 			_pending_action = ""
 			_set_modal_active(true)
-			_hud.show_result("The body of %s lies here. (You cannot question the dead.)" % nm)
+			_hud.show_result(
+				"The body of %s lies here. Examining the wounds suggests violent trauma "
+				"inflicted by a sharp or heavy instrument. (See the case file for full briefing.)" % nm
+			)
 			return
 		_pending_action = "talk"
 		_set_modal_active(true)

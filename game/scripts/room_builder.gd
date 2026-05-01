@@ -252,6 +252,13 @@ func _add_objects(objects: Array, tile_m: float, width: int, height: int, doors:
 	var floor_objects: Array = []
 	for o in objects:
 		var nm := String(o.get("name", ""))
+		# The world generator emits a WorldObject named "body of {victim}"
+		# at the body's location. We already render the dead character as a
+		# body lying on the floor, so this would double up visually. Skip
+		# rendering it; the player can still examine it by pressing E on
+		# the dead character (handled in main.gd).
+		if nm.to_lower().begins_with("body of "):
+			continue
 		if _is_wall_mounted(nm):
 			wall_objects.append(o)
 		elif _is_wall_adjacent(nm):
@@ -1312,10 +1319,38 @@ func _build_fireplace() -> Node3D:
 	# Logs lying side-by-side, slightly forward in the cavity
 	_add_block(root, Vector3(-0.20, 0.18, 0.05), Vector3(0.50, 0.10, 0.12), Color(0.30, 0.18, 0.10))
 	_add_block(root, Vector3( 0.20, 0.18, 0.05), Vector3(0.50, 0.10, 0.12), Color(0.25, 0.15, 0.08))
-	# Flame, well forward so it pokes out past the logs (visible from the room).
-	_add_block(root, Vector3(0.0, 0.40, 0.08), Vector3(0.50, 0.40, 0.18), fire)
-	_add_block(root, Vector3(0.0, 0.55, 0.08), Vector3(0.30, 0.24, 0.14), ember)
+
+	# Flame: a tapered stack of progressively smaller emissive blocks so it
+	# reads as a flickering blaze rather than a single rectangular cube.
+	# Tips are slightly offset to one side for asymmetry.
+	# Layer 1 (base): widest, deep orange
+	_add_emissive_block(root, Vector3( 0.00, 0.30, 0.07), Vector3(0.46, 0.16, 0.20), Color(0.95, 0.40, 0.10), 1.4)
+	# Layer 2: yellow-orange, narrower
+	_add_emissive_block(root, Vector3(-0.04, 0.42, 0.07), Vector3(0.34, 0.18, 0.16), Color(1.00, 0.55, 0.15), 1.6)
+	# Layer 3: bright yellow, narrower still
+	_add_emissive_block(root, Vector3( 0.06, 0.55, 0.07), Vector3(0.22, 0.18, 0.12), Color(1.00, 0.75, 0.20), 1.8)
+	# Layer 4: tip — small, near-white
+	_add_emissive_block(root, Vector3(-0.02, 0.68, 0.07), Vector3(0.14, 0.16, 0.08), Color(1.00, 0.90, 0.55), 2.0)
+	# A few hot ember chunks underneath the flame
+	_add_emissive_block(root, Vector3(-0.10, 0.16, 0.05), Vector3(0.14, 0.06, 0.10), ember, 1.5)
+	_add_emissive_block(root, Vector3( 0.12, 0.18, 0.05), Vector3(0.10, 0.05, 0.08), ember, 1.5)
 	return root
+
+
+func _add_emissive_block(parent: Node3D, pos: Vector3, size: Vector3, color: Color, energy: float) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = 0.6
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = energy
+	var box := BoxMesh.new()
+	box.size = size
+	var mi := MeshInstance3D.new()
+	mi.mesh = box
+	mi.transform.origin = pos
+	mi.set_surface_override_material(0, mat)
+	parent.add_child(mi)
 
 
 func _build_curtain() -> Node3D:
