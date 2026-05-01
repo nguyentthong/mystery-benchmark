@@ -13,6 +13,7 @@ dependencies = [
     "pygame>=2.6.0",
     "pyyaml>=6.0.3",
     "structlog>=25.5.0",
+    "websockets>=13.0",
 ]
 
 [project.optional-dependencies]
