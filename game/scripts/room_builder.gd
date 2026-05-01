@@ -249,23 +249,31 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 
 	# Try to load a Kenney mesh first; fall back to a tinted cube on failure
 	# so the game stays playable even when no assets are installed.
-	var asset_path := _resolve_asset("objects", label_text, "")
-	var glb := _try_instance_asset(asset_path)
+	var resolved := _resolve_asset_full("objects", label_text, "")
+	var glb := _try_instance_asset(String(resolved.get("path", "")))
 
 	var body := StaticBody3D.new()
-	body.transform.origin = Vector3(0.0, size * 0.5, 0.0)
 
 	if glb != null:
+		# Kenney models have their origin at the base (floor), so place the
+		# body at y=0 — adding the cube's half-height offset would lift the
+		# model off the ground.
+		body.transform.origin = Vector3(0.0, 0.0, 0.0)
+		var s: float = float(resolved.get("scale", 1.0))
+		if not is_equal_approx(s, 1.0):
+			glb.scale = Vector3(s, s, s)
 		body.add_child(glb)
-		# Add a generic AABB collider sized to the slot — Kenney meshes don't
-		# ship with colliders. Approximate is fine; CLAUDE.md rule 11 only
-		# requires AABB collision, not pixel-perfect mesh collision.
+		# Generic AABB collider sized to the slot. Approximate per CLAUDE.md
+		# rule 11 (AABB collision, not pixel-perfect).
 		var col := CollisionShape3D.new()
 		var shape := BoxShape3D.new()
-		shape.size = Vector3(size, size, size)
+		var col_size: float = size * max(1.0, s)
+		shape.size = Vector3(col_size, col_size, col_size)
 		col.shape = shape
+		col.transform.origin = Vector3(0.0, col_size * 0.5, 0.0)
 		body.add_child(col)
 	else:
+		body.transform.origin = Vector3(0.0, size * 0.5, 0.0)
 		var mat := StandardMaterial3D.new()
 		mat.albedo_color = color
 		mat.roughness = 0.6
@@ -328,26 +336,38 @@ func _spawn_character(
 	)
 	add_child(holder)
 
-	var asset_path := _resolve_asset("characters", display_name, role)
-	var glb := _try_instance_asset(asset_path)
+	var resolved := _resolve_asset_full("characters", display_name, role)
+	var glb := _try_instance_asset(String(resolved.get("path", "")))
 
 	var body := StaticBody3D.new()
 
 	var label_prefix := ""
 	var label_height: float = 2.1
+	var glb_path_present := glb != null
+
 	if alive:
-		body.transform.origin = Vector3(0.0, 0.85, 0.0)
+		# Kenney character models have origin at the FEET; place body at y=0.
+		# Capsule fallback is centered, so it gets y=0.85.
+		if glb_path_present:
+			body.transform.origin = Vector3(0.0, 0.0, 0.0)
+		else:
+			body.transform.origin = Vector3(0.0, 0.85, 0.0)
 	else:
-		# CLAUDE.md rule 14: bodies don't move. Lay the visual flat by
-		# rotating the static body 90 deg around Z. Capsule capsule's long
-		# axis becomes horizontal; same rotation works for a humanoid GLB
-		# (the standing model becomes a fallen body).
-		body.transform.origin = Vector3(0.0, 0.35, 0.0)
+		# CLAUDE.md rule 14: bodies don't move. Lay flat by rotating 90 deg
+		# around Z. With a feet-origin GLB the model rotates around its feet
+		# (slightly off centre but readable as a fallen body).
+		if glb_path_present:
+			body.transform.origin = Vector3(0.0, 0.0, 0.0)
+		else:
+			body.transform.origin = Vector3(0.0, 0.35, 0.0)
 		body.rotation = Vector3(0.0, 0.0, deg_to_rad(90.0))
 		label_prefix = "[BODY] "
 		label_height = 1.2
 
 	if glb != null:
+		var s: float = float(resolved.get("scale", 1.0))
+		if not is_equal_approx(s, 1.0):
+			glb.scale = Vector3(s, s, s)
 		body.add_child(glb)
 	else:
 		var mat := StandardMaterial3D.new()
@@ -361,13 +381,15 @@ func _spawn_character(
 		visual.mesh = capsule
 		body.add_child(visual)
 
-	# Capsule collider regardless of mesh source so the player can't walk
-	# through bodies / NPCs (CLAUDE.md rule 11).
 	var col := CollisionShape3D.new()
 	var shape := CapsuleShape3D.new()
 	shape.radius = 0.35
 	shape.height = 1.7
 	col.shape = shape
+	# When the alive GLB has its origin at the feet, lift the capsule collider
+	# up so it covers the standing body, not the floor below.
+	if alive and glb_path_present:
+		col.transform.origin = Vector3(0.0, 0.85, 0.0)
 	body.add_child(col)
 	holder.add_child(body)
 
@@ -423,34 +445,57 @@ func _load_asset_map() -> void:
 		_asset_map = parsed
 
 
-func _resolve_asset(category: String, entity_name: String, role: String) -> String:
+func _resolve_asset_full(category: String, entity_name: String, role: String) -> Dictionary:
+	# Returns {path: String, scale: float}. Empty path means "no asset; use fallback".
+	var result := {"path": "", "scale": 1.0}
 	if _asset_map.is_empty():
-		return ""
+		return result
 	var bucket: Variant = _asset_map.get(category)
 	if typeof(bucket) != TYPE_DICTIONARY:
-		return ""
+		return result
 	var asset_root: String = String(_asset_map.get("asset_root", "res://assets/kenney/"))
+	var category_default_scale: float = float(bucket.get("default_scale", 1.0))
+	result["scale"] = category_default_scale
 
-	# 1. Role-specific override (used for characters: by_role -> {suspect: ..., victim: ...})
+	# 1. Role-specific override (characters -> by_role)
 	if role != "" and bucket.has("by_role"):
 		var by_role: Dictionary = bucket.get("by_role", {})
 		if by_role.has(role):
-			return asset_root + String(by_role[role])
+			var entry: Variant = by_role[role]
+			result["path"] = asset_root + String(_entry_asset(entry))
+			result["scale"] = _entry_scale(entry, category_default_scale)
+			return result
 
-	# 2. Substring patterns (used for objects: patterns -> [{contains, asset}])
+	# 2. Substring patterns (objects -> patterns)
 	if bucket.has("patterns"):
 		var patterns: Array = bucket.get("patterns", [])
 		var lower_name := entity_name.to_lower()
 		for p in patterns:
 			var needle := String(p.get("contains", "")).to_lower()
 			if needle != "" and needle in lower_name:
-				return asset_root + String(p.get("asset", ""))
+				result["path"] = asset_root + String(p.get("asset", ""))
+				result["scale"] = _entry_scale(p, category_default_scale)
+				return result
 
 	# 3. Default for the category
 	if bucket.has("default"):
-		return asset_root + String(bucket["default"])
+		var entry2: Variant = bucket["default"]
+		result["path"] = asset_root + String(_entry_asset(entry2))
+		result["scale"] = _entry_scale(entry2, category_default_scale)
 
-	return ""
+	return result
+
+
+func _entry_asset(entry: Variant) -> String:
+	if typeof(entry) == TYPE_DICTIONARY:
+		return String(entry.get("asset", ""))
+	return String(entry)
+
+
+func _entry_scale(entry: Variant, default_scale: float) -> float:
+	if typeof(entry) == TYPE_DICTIONARY and entry.has("scale"):
+		return float(entry["scale"])
+	return default_scale
 
 
 func _try_instance_asset(path: String) -> Node3D:
