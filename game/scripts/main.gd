@@ -113,6 +113,10 @@ func _on_message(msg: Dictionary) -> void:
 			_hud.show_inventory(msg.get("items", []))
 			_pending_action = ""
 			_set_modal_active(true)
+		"case_file":
+			_hud.show_case_file(msg)
+			_pending_action = ""
+			_set_modal_active(true)
 		"accusation_result":
 			_apply_accusation_result(msg)
 		"world_graph":
@@ -207,9 +211,15 @@ func _input(event: InputEvent) -> void:
 			_close_open_modal()
 		return
 
-	# Non-typing modals (result panels, inventory) can be dismissed with E/TAB/ESC.
+	# Non-typing modals (result panels, inventory, case file) can be dismissed
+	# with E/TAB/C/ESC.
 	if _hud.is_any_modal_open():
-		if key == KEY_ESCAPE or key == KEY_E or (key == KEY_TAB and _hud.is_inventory_open()):
+		var dismiss := key == KEY_ESCAPE or key == KEY_E
+		if key == KEY_TAB and _hud.is_inventory_open():
+			dismiss = true
+		if key == KEY_C and _hud.is_case_open():
+			dismiss = true
+		if dismiss:
 			_close_open_modal()
 			get_viewport().set_input_as_handled()
 		return
@@ -228,6 +238,9 @@ func _input(event: InputEvent) -> void:
 		KEY_F:
 			_open_accuse()
 			get_viewport().set_input_as_handled()
+		KEY_C:
+			_request_case_file()
+			get_viewport().set_input_as_handled()
 
 
 func _close_open_modal() -> void:
@@ -237,6 +250,8 @@ func _close_open_modal() -> void:
 		_hud.close_accuse()
 	elif _hud.is_inventory_open():
 		_hud.close_inventory()
+	elif _hud.is_case_open():
+		_hud.close_case()
 	elif _hud.is_result_open():
 		_hud.close_result()
 	elif _hud.is_accusation_result_open():
@@ -274,6 +289,11 @@ func _try_interact() -> void:
 func _request_inventory() -> void:
 	_pending_action = "inventory"
 	_ws.send_json({"type": "inventory", "request_id": _next_rid("inv")})
+
+
+func _request_case_file() -> void:
+	_pending_action = "case_file"
+	_ws.send_json({"type": "case_file", "request_id": _next_rid("case")})
 
 
 func _open_accuse() -> void:

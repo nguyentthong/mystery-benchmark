@@ -262,6 +262,15 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 		var s: float = float(resolved.get("scale", 1.0))
 		if not is_equal_approx(s, 1.0):
 			glb.scale = Vector3(s, s, s)
+		# Try to load the sibling .png so the prop shows Kenney's natural
+		# colors. Only fall back to a flat category tint if no texture is
+		# available.
+		var asset_path := String(resolved.get("path", ""))
+		var tex := _try_load_sibling_texture(asset_path)
+		if tex != null:
+			_apply_external_texture(glb, tex)
+		else:
+			_apply_tint(glb, color)
 		body.add_child(glb)
 		# Generic AABB collider sized to the slot. Approximate per CLAUDE.md
 		# rule 11 (AABB collision, not pixel-perfect).
@@ -368,6 +377,13 @@ func _spawn_character(
 		var s: float = float(resolved.get("scale", 1.0))
 		if not is_equal_approx(s, 1.0):
 			glb.scale = Vector3(s, s, s)
+		# Characters: keep Kenney's natural skin / clothing. Try to load the
+		# sibling .png as the surface texture; if that fails, leave the GLB's
+		# embedded materials alone. The role colour stays only on the label.
+		var asset_path := String(resolved.get("path", ""))
+		var tex := _try_load_sibling_texture(asset_path)
+		if tex != null:
+			_apply_external_texture(glb, tex)
 		body.add_child(glb)
 	else:
 		var mat := StandardMaterial3D.new()
@@ -509,19 +525,58 @@ func _try_instance_asset(path: String) -> Node3D:
 	if res is PackedScene:
 		var node: Node = (res as PackedScene).instantiate()
 		if node is Node3D:
-			_ensure_vertex_colors(node as Node3D)
 			return node
 		else:
 			node.queue_free()
 	return null
 
 
-func _ensure_vertex_colors(root: Node3D) -> void:
-	# Kenney's low-poly models encode their colours as per-vertex colours
-	# (instead of full textures). Godot's default StandardMaterial3D imports
-	# them with vertex_color_use_as_albedo=false, so meshes render white.
-	# Walk the imported scene and flip the flag on any material whose
-	# albedo texture is empty — leaves real-textured materials alone.
+func _try_load_sibling_texture(glb_path: String) -> Texture2D:
+	# Kenney ships per-model PNGs alongside the .glb files. If the .glb's
+	# embedded materials don't render correctly (Forward+ on Apple Silicon
+	# with some GLBs strips them), explicitly load the sibling .png as the
+	# albedo texture.
+	if glb_path == "":
+		return null
+	var png_path := glb_path
+	if png_path.ends_with(".glb"):
+		png_path = png_path.substr(0, png_path.length() - 4) + ".png"
+	elif png_path.ends_with(".gltf"):
+		png_path = png_path.substr(0, png_path.length() - 5) + ".png"
+	else:
+		return null
+	if not ResourceLoader.exists(png_path):
+		return null
+	var res := ResourceLoader.load(png_path)
+	if res is Texture2D:
+		return res as Texture2D
+	return null
+
+
+func _apply_external_texture(root: Node3D, tex: Texture2D) -> void:
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		if node is MeshInstance3D:
+			var mi := node as MeshInstance3D
+			var mesh := mi.mesh
+			if mesh != null:
+				for i in mesh.get_surface_count():
+					var mat := StandardMaterial3D.new()
+					mat.albedo_texture = tex
+					mat.roughness = 0.75
+					mat.metallic = 0.0
+					mi.set_surface_override_material(i, mat)
+		for child in node.get_children():
+			stack.push_back(child)
+
+
+func _apply_tint(root: Node3D, tint: Color) -> void:
+	# Force a coloured StandardMaterial3D on every surface in the loaded GLB.
+	# Kenney's embedded materials sometimes don't render correctly across
+	# Godot 4 / Forward+ / GL Compatibility / Apple Silicon combinations,
+	# leaving meshes solid white. Forcing a tinted material guarantees
+	# visible, role-coded entities.
 	var stack: Array = [root]
 	while not stack.is_empty():
 		var node: Node = stack.pop_back()
@@ -531,14 +586,11 @@ func _ensure_vertex_colors(root: Node3D) -> void:
 			if mesh != null:
 				var n := mesh.get_surface_count()
 				for i in n:
-					var mat := mi.get_active_material(i)
-					if mat is StandardMaterial3D:
-						var sm := mat as StandardMaterial3D
-						if sm.albedo_texture == null:
-							# Duplicate so we don't mutate the cached resource.
-							var dup := sm.duplicate() as StandardMaterial3D
-							dup.vertex_color_use_as_albedo = true
-							mi.set_surface_override_material(i, dup)
+					var mat := StandardMaterial3D.new()
+					mat.albedo_color = tint
+					mat.roughness = 0.7
+					mat.metallic = 0.0
+					mi.set_surface_override_material(i, mat)
 		for child in node.get_children():
 			stack.push_back(child)
 

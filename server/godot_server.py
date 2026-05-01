@@ -63,6 +63,7 @@ import websockets
 from mystery_world import COMPLEXITY_PRESETS, ComplexityLevel
 from mystery_world.entities import CharacterRole
 from mystery_world.generator import generate_mystery
+from mystery_world.narrator import render_initial_briefing
 from mystery_world.npc_responder import NPCResponder
 from mystery_world.renderer.layout import (
     Tile,
@@ -265,6 +266,56 @@ class GodotServer:
             **room,
         }
 
+    def _case_file_payload(self, request_id: str) -> dict[str, Any]:
+        state = self.env.state
+        victim = state.characters.get(state.victim_id)
+        body_loc = state.locations.get(state.body_location_id or state.murder_location_id)
+        suspects = []
+        innocents = []
+        for char in state.characters.values():
+            if char.id == state.victim_id:
+                continue
+            entry = {
+                "id": char.id,
+                "name": char.full_name,
+                "alive": bool(char.is_alive),
+                "personality": getattr(char, "personality", "") or "",
+                "build": char.physical_traits.build,
+                "hair": char.physical_traits.hair,
+                "hands": char.physical_traits.hands,
+            }
+            if CharacterRole.SUSPECT in char.roles:
+                entry["motive"] = char.motive or ""
+                suspects.append(entry)
+            else:
+                innocents.append(entry)
+        suspects.sort(key=lambda c: c["name"])
+        innocents.sort(key=lambda c: c["name"])
+
+        evidence_total = sum(
+            1 for ev in state.evidence.values() if not getattr(ev, "is_red_herring", False)
+        )
+
+        try:
+            briefing = render_initial_briefing(self.env)
+        except Exception:
+            logger.exception("render_initial_briefing failed")
+            briefing = ""
+
+        return {
+            "type": "case_file",
+            "request_id": request_id,
+            "briefing": briefing,
+            "victim_name": victim.full_name if victim else "",
+            "body_location_name": body_loc.name if body_loc else "",
+            "suspects": suspects,
+            "innocents": innocents,
+            "evidence_found": len(self.env._discovered_evidence),
+            "evidence_total": evidence_total,
+            "actions_taken": self.env.actions_taken,
+            "budget_remaining": self.env.budget_remaining,
+        }
+
     @staticmethod
     def _action_result_payload(
         request_id: str, result: Any
@@ -394,6 +445,9 @@ class GodotServer:
                         }
                     )
                 )
+
+            elif msg_type == "case_file":
+                await ws.send(json.dumps(self._case_file_payload(request_id)))
 
             else:
                 await ws.send(

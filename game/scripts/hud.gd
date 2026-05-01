@@ -47,6 +47,9 @@ var _accuse_location: LineEdit
 var _result_modal_panel: Control
 var _result_modal_text: RichTextLabel
 
+var _case_panel: Control
+var _case_text: RichTextLabel
+
 
 func _ready() -> void:
 	_build_always_on()
@@ -55,6 +58,7 @@ func _ready() -> void:
 	_build_inventory_panel()
 	_build_accuse_panel()
 	_build_accusation_result_panel()
+	_build_case_panel()
 
 
 # =============================================================================
@@ -85,7 +89,7 @@ func _build_always_on() -> void:
 	add_child(_hover_label)
 
 	_help_label = _make_label(Vector2(0, 0), 13)
-	_help_label.text = "WASD move | E interact | TAB inventory | F accuse | ESC release/close"
+	_help_label.text = "WASD move | E interact | C case file | TAB inventory | F accuse | ESC close"
 	_help_label.modulate = Color(0.85, 0.85, 0.85)
 	_help_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_help_label.position = Vector2(10, -28)
@@ -477,11 +481,99 @@ func close_accusation_result() -> void:
 
 
 # =============================================================================
+# Case file panel
+# =============================================================================
+
+func _build_case_panel() -> void:
+	_case_panel = _make_modal_root()
+	var v := _make_modal_box(_case_panel, Vector2(820, 560))
+
+	var title := Label.new()
+	title.add_theme_font_size_override("font_size", 22)
+	title.text = "Case File"
+	v.add_child(title)
+
+	_case_text = _make_richtext()
+	_case_text.custom_minimum_size = Vector2(0, 460)
+	v.add_child(_case_text)
+
+	v.add_child(_make_hint("[C] or [ESC] to close"))
+
+	_case_panel.visible = false
+	add_child(_case_panel)
+
+
+func show_case_file(data: Dictionary) -> void:
+	hide_all_modals()
+	var lines: PackedStringArray = []
+
+	lines.append("THE CASE")
+	lines.append("--------")
+	lines.append("Victim:    %s" % String(data.get("victim_name", "?")))
+	lines.append("Body in:   %s" % String(data.get("body_location_name", "?")))
+	lines.append("Evidence:  %d / %d collected" % [
+		int(data.get("evidence_found", 0)),
+		int(data.get("evidence_total", 0)),
+	])
+	lines.append("Actions:   %d taken / %d remaining" % [
+		int(data.get("actions_taken", 0)),
+		int(data.get("budget_remaining", 0)),
+	])
+	lines.append("")
+
+	var briefing := String(data.get("briefing", ""))
+	if briefing != "":
+		lines.append("BRIEFING")
+		lines.append("--------")
+		lines.append(briefing)
+		lines.append("")
+
+	var suspects: Array = data.get("suspects", [])
+	lines.append("SUSPECTS (%d)" % suspects.size())
+	lines.append("------------")
+	for s in suspects:
+		var nm := String(s.get("name", "?"))
+		lines.append("  %s" % nm)
+		var motive := String(s.get("motive", ""))
+		if motive != "":
+			lines.append("    motive:  %s" % motive)
+		var build := String(s.get("build", ""))
+		var hair  := String(s.get("hair", ""))
+		var hands := String(s.get("hands", ""))
+		var traits_parts: PackedStringArray = []
+		if build != "": traits_parts.append(build)
+		if hair  != "": traits_parts.append(hair)
+		if hands != "": traits_parts.append(hands)
+		if traits_parts.size() > 0:
+			lines.append("    appears: %s" % ", ".join(traits_parts))
+		lines.append("")
+
+	var innocents: Array = data.get("innocents", [])
+	if innocents.size() > 0:
+		lines.append("INNOCENTS / WITNESSES (%d)" % innocents.size())
+		lines.append("--------------------------")
+		for c in innocents:
+			lines.append("  %s" % String(c.get("name", "?")))
+		lines.append("")
+
+	_case_text.text = "\n".join(lines)
+	_case_panel.visible = true
+
+
+func is_case_open() -> bool:
+	return _case_panel != null and _case_panel.visible
+
+
+func close_case() -> void:
+	_case_panel.visible = false
+
+
+# =============================================================================
 # Modal management
 # =============================================================================
 
 func is_any_modal_open() -> bool:
-	return is_result_open() or is_chat_open() or is_inventory_open() or is_accuse_open() or is_accusation_result_open()
+	return is_result_open() or is_chat_open() or is_inventory_open() or is_accuse_open() or is_accusation_result_open() or is_case_open()
 
 
 func is_typing_modal_open() -> bool:
@@ -495,3 +587,4 @@ func hide_all_modals() -> void:
 	if _inventory_panel: _inventory_panel.visible = false
 	if _accuse_panel: _accuse_panel.visible = false
 	if _result_modal_panel: _result_modal_panel.visible = false
+	if _case_panel: _case_panel.visible = false
