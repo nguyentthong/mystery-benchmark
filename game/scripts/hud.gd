@@ -16,7 +16,7 @@ extends CanvasLayer
 
 signal talk_submitted(character_name: String, question: String)
 signal accusation_submitted(suspect: String, weapon: String, location: String)
-signal start_game_requested(mode: String, seed: String, openai_api_key: String)
+signal start_game_requested(mode: String, seed: String, openai_api_key: String, complexity: String)
 
 # always-on
 var _fps_label: Label
@@ -56,6 +56,7 @@ var _start_panel: Control
 var _start_seed_input: LineEdit
 var _start_api_key_input: LineEdit
 var _start_mode_buttons: ButtonGroup
+var _start_difficulty_btn: OptionButton
 
 
 func _ready() -> void:
@@ -635,26 +636,33 @@ func _build_start_panel() -> void:
 
 	v.add_child(_make_spacer(8))
 
-	# Mode
+	# Mode (currently fixed; VLM runner not wired into the Godot client yet)
 	var mode_label := Label.new()
 	mode_label.add_theme_font_size_override("font_size", 14)
-	mode_label.text = "Mode:"
+	mode_label.text = "Mode:  Play yourself  (VLM agent mode coming soon)"
+	mode_label.modulate = Color(0.85, 0.85, 0.85)
 	v.add_child(mode_label)
-
 	_start_mode_buttons = ButtonGroup.new()
-	var human_btn := CheckBox.new()
-	human_btn.text = "Play yourself"
-	human_btn.button_group = _start_mode_buttons
-	human_btn.button_pressed = true
-	human_btn.set_meta("mode", "human")
-	v.add_child(human_btn)
 
-	var vlm_btn := CheckBox.new()
-	vlm_btn.text = "Watch a VLM agent  (coming soon)"
-	vlm_btn.button_group = _start_mode_buttons
-	vlm_btn.disabled = true
-	vlm_btn.set_meta("mode", "vlm")
-	v.add_child(vlm_btn)
+	# Difficulty selector — five complexity levels matched to server's
+	# COMPLEXITY_PRESETS. EASY is the default; smaller worlds, lighter
+	# clue load, more forgiving budget.
+	var diff_row := HBoxContainer.new()
+	diff_row.add_theme_constant_override("separation", 8)
+	var diff_label := Label.new()
+	diff_label.text = "Difficulty:"
+	diff_label.custom_minimum_size = Vector2(120, 0)
+	diff_row.add_child(diff_label)
+	_start_difficulty_btn = OptionButton.new()
+	_start_difficulty_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_start_difficulty_btn.add_item("Trivial",  0)
+	_start_difficulty_btn.add_item("Easy",     1)
+	_start_difficulty_btn.add_item("Medium",   2)
+	_start_difficulty_btn.add_item("Hard",     3)
+	_start_difficulty_btn.add_item("Expert",   4)
+	_start_difficulty_btn.select(1)  # default EASY
+	diff_row.add_child(_start_difficulty_btn)
+	v.add_child(diff_row)
 
 	v.add_child(_make_spacer(8))
 
@@ -712,16 +720,16 @@ func _make_spacer(h: int) -> Control:
 
 
 func _on_start_clicked() -> void:
-	var mode := "human"
-	if _start_mode_buttons:
-		var pressed := _start_mode_buttons.get_pressed_button()
-		if pressed and pressed.has_meta("mode"):
-			mode = String(pressed.get_meta("mode"))
+	var difficulty_id: int = 1
+	if _start_difficulty_btn:
+		difficulty_id = _start_difficulty_btn.get_selected_id()
+	var difficulty_name: String = ["TRIVIAL", "EASY", "MEDIUM", "HARD", "EXPERT"][clampi(difficulty_id, 0, 4)]
 	emit_signal(
 		"start_game_requested",
-		mode,
+		"human",
 		_start_seed_input.text.strip_edges(),
 		_start_api_key_input.text.strip_edges(),
+		difficulty_name,
 	)
 
 

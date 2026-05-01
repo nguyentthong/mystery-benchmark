@@ -110,8 +110,8 @@ func _on_connected() -> void:
 	_hud.show_start_form()
 
 
-func _on_start_game_requested(_mode: String, seed: String, openai_api_key: String) -> void:
-	print("[main] new_game requested seed=%s key_provided=%s" % [seed, str(openai_api_key != "")])
+func _on_start_game_requested(_mode: String, seed: String, openai_api_key: String, complexity: String) -> void:
+	print("[main] new_game requested seed=%s difficulty=%s key_provided=%s" % [seed, complexity, str(openai_api_key != "")])
 	_hud.set_status("Starting new game ...")
 	_briefing_shown = false
 	_game_over = false
@@ -120,7 +120,7 @@ func _on_start_game_requested(_mode: String, seed: String, openai_api_key: Strin
 		"request_id": _next_rid("new"),
 		"seed": seed,
 		"openai_api_key": openai_api_key,
-		"complexity": "EASY",
+		"complexity": complexity,
 	})
 
 

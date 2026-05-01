@@ -1089,40 +1089,42 @@ func _decorate_table_if_applicable(holder: Node3D, entity_name: String, kenney_s
 	# candles, etc. sit on the surface instead of hovering above or
 	# clipping into it.
 	var lower := entity_name.to_lower()
-	var is_table: bool = false
-	var is_desk: bool = false
-	if "writing desk" in lower or "desk" in lower:
-		is_table = true
-		is_desk = true
-	elif "side table" in lower or "table" in lower:
-		is_table = true
-	if not is_table:
+	var is_side_table: bool = "side table" in lower
+	var is_desk: bool = ("writing desk" in lower or "desk" in lower) and not is_side_table
+	# A "table" without "side" in its name (dining table) acts like a desk
+	# for chair placement.
+	var is_full_table: bool = ("table" in lower) and not is_side_table and not is_desk
+
+	if not (is_side_table or is_desk or is_full_table):
 		return
 
-	# Place the chair directly in front of the desk, centred (not off to
-	# one side). The chair is built with its backrest on -Z, so it faces
-	# +Z by default. Rotate by π so it faces -Z (toward the table).
-	var chair := _build_table_side_chair()
-	# Distance the chair's back edge from the table front so the seat
-	# tucks just under it.
-	var chair_distance: float = (0.55 if is_desk else 0.40) * kenney_scale + 0.10
-	chair.transform.origin = Vector3(0.0, 0.0, chair_distance)
-	chair.rotation.y = PI
-	holder.add_child(chair)
+	# Side tables don't get a paired chair — they live next to sofas /
+	# armchairs in the layout. Desks and full tables get a chair pulled
+	# up in front, centred.
+	if is_desk or is_full_table:
+		var chair := _build_table_side_chair()
+		var chair_distance: float = (0.55 if is_desk else 0.40) * kenney_scale + 0.10
+		chair.transform.origin = Vector3(0.0, 0.0, chair_distance)
+		chair.rotation.y = PI
+		holder.add_child(chair)
 
-	# Decorations on top — only when there's enough room (skip side tables
-	# unless they're large enough to host more than a candle).
+	# Decorations on top — keep light for side tables (one candle), more
+	# generous for desks (book + candle + inkwell).
 	var decor_y: float = max(table_top_y, 0.3)
-	# A book lying flat
+	if is_side_table:
+		var candle := _build_small_candle()
+		candle.transform.origin = Vector3(0.0, decor_y, 0.0)
+		holder.add_child(candle)
+		return
+
+	# Desk / table decorations
 	var book := _build_book()
 	book.transform.origin = Vector3(-0.15 * kenney_scale, decor_y, 0.05 * kenney_scale)
 	book.rotation.y = deg_to_rad(15.0)
 	holder.add_child(book)
-	# A small lit candle
 	var candle := _build_small_candle()
 	candle.transform.origin = Vector3(0.20 * kenney_scale, decor_y, -0.05 * kenney_scale)
 	holder.add_child(candle)
-	# Desks get an extra decoration: an inkwell
 	if is_desk:
 		var ink := _build_inkbottle()
 		ink.transform.origin = Vector3(0.30 * kenney_scale, decor_y, 0.18 * kenney_scale)
