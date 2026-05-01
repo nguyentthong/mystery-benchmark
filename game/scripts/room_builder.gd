@@ -39,18 +39,34 @@ func build_from(room: Dictionary, tile_m: float) -> void:
 
 
 func _add_floor(width: int, height: int, tile_m: float) -> void:
-	var floor_mesh := PlaneMesh.new()
-	floor_mesh.size = Vector2(width * tile_m, height * tile_m)
+	var size_x: float = width * tile_m
+	var size_z: float = height * tile_m
+	var center := Vector3(size_x * 0.5, 0.0, size_z * 0.5)
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = FLOOR_COLOR
 	mat.roughness = 0.95
-	floor_mesh.material = mat
 
+	# Visible top surface
+	var floor_mesh := PlaneMesh.new()
+	floor_mesh.size = Vector2(size_x, size_z)
+	floor_mesh.material = mat
 	var mi := MeshInstance3D.new()
 	mi.mesh = floor_mesh
-	mi.transform.origin = Vector3(width * tile_m * 0.5, 0.0, height * tile_m * 0.5)
+	mi.transform.origin = center
 	add_child(mi)
+
+	# Collider: a thin slab so the player's capsule rests on top at y=0.
+	# Without this, gravity pulls the player through the floor forever.
+	const SLAB := 0.2
+	var body := StaticBody3D.new()
+	body.transform.origin = Vector3(center.x, -SLAB * 0.5, center.z)
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(size_x, SLAB, size_z)
+	col.shape = shape
+	body.add_child(col)
+	add_child(body)
 
 
 func _add_walls(tiles: Array, width: int, height: int, tile_m: float) -> void:
