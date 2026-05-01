@@ -18,6 +18,11 @@ extends Node3D
 const WALL_HEIGHT := 3.0
 const FLOOR_COLOR := Color(0.45, 0.36, 0.28)
 const WALL_COLOR  := Color(0.78, 0.76, 0.72)
+# Door cells are visually distinct (warm wood tone) but solid in M1 — they're
+# placeholders for the room-transition triggers added in M3. A solid door
+# avoids the "walk through and fall into the void" failure mode without
+# pretending the door is fully implemented.
+const DOOR_COLOR  := Color(0.55, 0.32, 0.18)
 
 
 func build_from(room: Dictionary, tile_m: float) -> void:
@@ -74,12 +79,18 @@ func _add_walls(tiles: Array, width: int, height: int, tile_m: float) -> void:
 	wall_mat.albedo_color = WALL_COLOR
 	wall_mat.roughness = 0.85
 
+	var door_mat := StandardMaterial3D.new()
+	door_mat.albedo_color = DOOR_COLOR
+	door_mat.roughness = 0.7
+
 	for x in width:
 		var col: Array = tiles[x]
 		for y in height:
-			if str(col[y]) != "W":
-				continue
-			_add_wall_block(x, y, tile_m, wall_mat)
+			var code := str(col[y])
+			if code == "W":
+				_add_wall_block(x, y, tile_m, wall_mat)
+			elif code == "D":
+				_add_wall_block(x, y, tile_m, door_mat)
 
 
 func _add_wall_block(tx: int, ty: int, tile_m: float, mat: StandardMaterial3D) -> void:
