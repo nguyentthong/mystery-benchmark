@@ -336,8 +336,8 @@ func _try_interact() -> void:
 			_pending_action = ""
 			_set_modal_active(true)
 			_hud.show_result(
-				"The body of %s lies here. Examining the wounds suggests violent trauma "
-				"inflicted by a sharp or heavy instrument. (See the case file for full briefing.)" % nm
+				("The body of %s lies here. Examining the wounds suggests violent trauma " +
+				"inflicted by a sharp or heavy instrument. (See the case file for full briefing.)") % nm
 			)
 			return
 		_pending_action = "talk"
