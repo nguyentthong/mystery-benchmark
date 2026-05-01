@@ -1,10 +1,73 @@
-# MysteryArena 3D port — Milestone 1 implementation notes
+# MysteryArena 3D port — implementation notes
+
+This document covers what's been built across what was originally split as
+Milestones 1, 2, 3, 4, and partial 5. Scope grew because the user wanted a
+playable detective game, not just a walking-simulator stub.
 
 ## Targeted versions
 
-- **Godot 4.3 stable** (uses `WebSocketPeer`, `CharacterBody3D`, GL Compatibility renderer). 4.4+ should also work; 4.2 untested.
-- **Python 3.13** (matches `pyproject.toml` `requires-python`).
+- **Godot 4.3 stable** (uses `WebSocketPeer`, `CharacterBody3D`, GL
+  Compatibility renderer). 4.4+ should also work; 4.2 untested.
+- **Python 3.13** (matches `pyproject.toml`).
 - **`websockets >= 13`** (tested with 16.0).
+- macOS (Apple Silicon or Intel) verified as a dev target. Linux/Windows
+  exports not yet built.
+
+## What works
+
+### Game flow
+- Procedurally generated mystery world driven by the existing
+  `mystery_world/generator.py` (unchanged). Seed-deterministic.
+- First-person 3D exploration of the spawn room and any room reachable
+  through doors. Room transitions are seamless: walk into a door's floor
+  patch, the world rebuilds, you respawn just inside the connected room.
+- Visited rooms are tracked server-side and shown on a HUD minimap
+  (top-right): `[*]` current, `[x]` visited, `[ ]` unvisited.
+- Object props rendered as Kenney `.glb` meshes when assets are installed,
+  otherwise tinted boxes (red = weapon, dark red = murder weapon, tan =
+  generic object). Murder weapon hue is just for debug feedback — the agent
+  doesn't get told which weapon is the murder weapon, only that something
+  is "a weapon."
+- Characters rendered as Kenney humanoids (or capsules as fallback). Alive
+  NPCs stand; the victim's body lies flat on the floor (CLAUDE.md rule 14).
+  Color-coded labels: blue (suspect), green (innocent), tan (witness),
+  red (victim/body).
+- Crosshair + camera-forward raycast picks out the focused entity, with a
+  hover prompt at the bottom of the screen (`[E] Examine X`, `[E] Talk to X`).
+- E key examines an object or opens a chat with an NPC.
+- TAB toggles the inventory panel (lists collected evidence).
+- F opens the accusation modal (suspect / weapon / location text inputs;
+  ENTER on Location to submit).
+- ESC releases mouse capture / closes the open modal.
+- Accusation result panel shows CORRECT or INCORRECT with the partial
+  score breakdown.
+
+### Server (Python)
+- `server/godot_server.py` is a WebSocket server wrapping `MysteryEnvironment`.
+  All actions are translated into `env.step(AgentAction.*)` calls, so the
+  benchmark scoring stays identical between the Godot client and the LLM
+  agents in `agents/`.
+- LISTEN line on stdout for the M5 sidecar contract; everything else on
+  stderr (CLAUDE.md rules 8 + 9 about log discipline).
+- `OPENAI_API_KEY` env var → an NPCResponder is attached automatically and
+  TALK_TO returns LLM-generated NPC dialogue. Without the key, the
+  deterministic template fallback in the env is used.
+- Visited rooms tracked in the server wrapper. World graph + visited bits
+  are bundled into every `room` payload so the minimap stays fresh
+  without a separate request.
+
+### Asset pipeline (Kenney)
+- `scripts/download_kenney_assets.sh /path/to/*.zip` extracts already-
+  downloaded Kenney CC0 packs (Furniture Kit, Mini Characters, Weapon Pack)
+  into `game/assets/kenney/` organised by kit. With no args it prints the
+  manual-download instructions and reports how many assets are present.
+- `game/config/asset_map.json` maps logical entity kinds + name patterns
+  to relative `.glb` paths under the assets dir. Substring matching on
+  object names ("kitchen cleaver" matches `cleaver` → `weapons/knife.glb`).
+  Edit freely — no code change needed.
+- `room_builder.gd` tries the mapped path; if the file isn't present
+  (`ResourceLoader.exists` → false), falls back to the colored cube/capsule.
+  This means the game works end-to-end before any assets are downloaded.
 
 ## How to run (developer mode)
 
@@ -13,71 +76,92 @@ Two terminals.
 Terminal A — start the Python server:
 
 ```
-cd /mnt/ssd2/thong/mystery-benchmark
-uv pip install 'websockets>=13.0'           # one-time
+cd /path/to/mystery-benchmark
+uv sync                                       # installs websockets etc.
+export OPENAI_API_KEY=sk-...                  # optional but recommended
 uv run python -m server.godot_server --seed 42
 # stdout: LISTEN ws://127.0.0.1:7777
-# stderr: structured logs
 ```
 
-Flags:
+Server flags:
 - `--seed N`              world seed (default 42)
-- `--port N`              port; `0` for an OS-assigned free port (M5 sidecar mode)
+- `--port N`              port; `0` for an OS-assigned free port
 - `--host H`              default `127.0.0.1`
 - `--complexity LEVEL`    `TRIVIAL|EASY|MEDIUM|HARD|EXPERT` (default `EASY`)
+- `--npc-model MODEL`     OpenAI-compatible model id (default `gpt-4o-mini`)
 - `--log-level LEVEL`     default `INFO`
 
-Terminal B — verify with the Python smoke client:
+Terminal B — Godot:
 
 ```
-uv run python -m mystery_world.godot_client
-# connected: ws://127.0.0.1:7777
-# room:      Wine Pantry (loc_727630)
-# size:      18 x 13
-# doors:     1
-#   -  north  ->  Billiard Room
-# spawn:     (9.5, 6.5) facing 0 deg
+/Applications/Godot.app/Contents/MacOS/Godot --path /path/to/mystery-benchmark/game
 ```
 
-Or open the Godot project at `game/project.godot` and press **F5**:
+Or open `Godot.app`, **Import** → `mystery-benchmark/game/project.godot`,
+then F5.
 
-- Window opens at 1280×720, mouse captured.
-- Connects to `ws://127.0.0.1:7777` (override with env `MYSTERY_SERVER_URL=...` or CLI `-- --server ws://...`).
-- Renders the spawn room: floor + perimeter walls + lighting.
-- WASD to move, mouse to look. ESC releases mouse, click to recapture.
-- HUD shows FPS and the current room name (ASCII only).
+## Controls
 
-## Acceptance check (manually verified)
+- WASD — move
+- Mouse — look (captured by default)
+- E — interact (examine object / talk to NPC)
+- TAB — toggle inventory
+- F — make accusation
+- ESC — release mouse capture / close current modal
 
-- [x] `python -m server.godot_server --seed 42` runs and stays up.
-- [x] Stdout contains exactly `LISTEN ws://127.0.0.1:7777` — no pygame banner, no log lines (banner suppressed via `PYGAME_HIDE_SUPPORT_PROMPT=1` set before any imports). Logs go to stderr only.
-- [x] `--port 0` binds a free port and the LISTEN line reflects the chosen one (e.g. `LISTEN ws://127.0.0.1:44107`).
-- [x] **Determinism:** seed 42 → "Wine Pantry (loc_727630), 18×13, 1 door north → Billiard Room" twice. Seed 7 → "Attic Storage (loc_302686), 2 doors". Different seed produces a visibly different room.
-- [x] Server exits cleanly on SIGINT and SIGTERM.
-- [ ] **F5-in-Godot smoke test:** I have not run the Godot project on this host (Godot 4.3 binary not installed in the dev sandbox). All other acceptance criteria for the Godot side were validated by code review only — see "Things to verify on first F5 launch" below.
+## Optional: install Kenney 3D assets
 
-## Architecture
+The game ships playable with colored cubes/capsules. For richer visuals:
 
 ```
-┌─────────────────────────────────────┐    WebSocket / JSON    ┌────────────────────────────────────────┐
-│  Python                             │ ◄────────────────────► │  Godot 4 client                        │
-│                                     │                        │                                        │
-│  server/godot_server.py             │                        │  game/project.godot                    │
-│   ├ generate_mystery(seed)          │                        │  game/scenes/main.tscn                 │
-│   ├ build_room_layout (existing)    │                        │  game/scripts/main.gd                  │
-│   ├ compute_door_pairings (exist.)  │                        │  game/scripts/ws_client.gd             │
-│   └ JSON protocol                   │                        │  game/scripts/room_builder.gd          │
-│                                     │                        │  game/scripts/player.gd                │
-│  mystery_world/godot_client.py      │ (smoke test, M3+ uses) │  game/scripts/hud.gd                   │
-└─────────────────────────────────────┘                        └────────────────────────────────────────┘
+# 1. Visit https://kenney.nl/assets and download (free / CC0):
+#      - Furniture Kit
+#      - Mini Characters Kit (or Character Kit)
+#      - Blaster Kit (or Weapon Pack)
+# 2. Extract them into the assets directory:
+./scripts/download_kenney_assets.sh ~/Downloads/kenney_*.zip
+# 3. Restart Godot.
 ```
 
-- **Python is authoritative** (`CLAUDE.md` rule 1). Godot does no procedural layout, no door pairing — it consumes whatever the server sends.
-- **Tile→world conversion** lives in one place: `TILE_M = 2.0` in `main.gd`, passed into the room builder. No magic `* 2.0` elsewhere.
-- **Door pairing** uses the existing `compute_door_pairings(world_state)` in `mystery_world/renderer/layout.py`, then `build_room_layout(location, sides)` for the player's spawn room. Doors come back with `wall ∈ {north, south, east, west}` already inferred so Godot doesn't need to recompute it.
+If the actual `.glb` filenames inside the Kenney packs differ from the
+defaults in `game/config/asset_map.json`, edit that JSON to point at the
+real names. Substring matching is forgiving.
+
+## WebSocket protocol summary
+
+Client → Server:
+
+| Message            | Fields                                              |
+|--------------------|-----------------------------------------------------|
+| ping               | request_id                                          |
+| get_current_room   | request_id                                          |
+| move_to_room       | request_id, target_location_id                      |
+| examine_object     | request_id, object_name                             |
+| talk_to            | request_id, character_name, question                |
+| take_object        | request_id, object_name                             |
+| inventory          | request_id                                          |
+| accuse             | request_id, suspect_name, weapon_name, location_name|
+| world_graph        | request_id                                          |
+
+Server → Client:
+
+| Message            | Fields                                              |
+|--------------------|-----------------------------------------------------|
+| pong               | request_id                                          |
+| room               | request_id, name, room_id, w/h, tiles, doors[],     |
+|                    | objects[], characters[], spawn{}, world_graph[]     |
+| action_result      | request_id, success, observation, evidence_found[]  |
+| inventory          | request_id, items[]                                 |
+| accusation_result  | request_id, correct, observation, details{}         |
+| world_graph        | request_id, locations[]                             |
+| error              | request_id, error                                   |
+
+Coordinate convention: tile (x, y) becomes world (x * 2, *, y * 2). 1 tile
+= 2 metres. tile X = world X (east), tile Y = world Z (south), Y is up.
 
 ## Files added
 
+- `CLAUDE.md` (root)                                      engineering rules
 - `server/__init__.py`
 - `server/godot_server.py`
 - `mystery_world/godot_client.py`
@@ -88,6 +172,10 @@ Or open the Godot project at `game/project.godot` and press **F5**:
 - `game/scripts/room_builder.gd`
 - `game/scripts/player.gd`
 - `game/scripts/hud.gd`
+- `game/config/asset_map.json`
+- `game/assets/kenney/.gitkeep`
+- `scripts/download_kenney_assets.sh`
+- `prompts/godot-port-milestone-1.md`
 - `prompts/godot-port-milestone-1-NOTES.md` (this file)
 
 ## Files modified
@@ -96,127 +184,81 @@ Or open the Godot project at `game/project.godot` and press **F5**:
 
 ## Files **not** modified (per `CLAUDE.md` rule 2)
 
-- `mystery_world/world.py`
-- `mystery_world/events.py`
-- `mystery_world/generator.py`
-- `mystery_world/narrator.py`
-- `mystery_world/npc_responder.py`
-- `mystery_world/entities.py`
-- `mystery_world/__init__.py`
-- everything in `mystery_world/renderer/`, `agents/`, `benchmark/`, `evaluation/`, `scripts/`, `examples/`, `web/`, `mystery_world.world` etc.
+- `mystery_world/world.py`, `events.py`, `generator.py`, `narrator.py`,
+  `npc_responder.py`, `entities.py`, `__init__.py`
+- `mystery_world/renderer/*` (still ships for the 2D web build)
+- `agents/`, `benchmark/`, `evaluation/`, `scripts/play.py`, `examples/`,
+  `web/`, `main.py`
 
-## Deviations from the prompt
+## What's deliberately not built yet
 
-1. **CLI argument convention for the Godot binary.** The prompt suggested
-   `--server ws://...`. Godot reserves engine-level CLI flags before `--`,
-   so user args are read from `OS.get_cmdline_user_args()`. The user must
-   pass them after a `--` separator at run time, e.g.
-   `mystery.exe -- --server ws://10.0.0.5:7777`. Both `--server URL` and
-   `--server=URL` forms are accepted. `MYSTERY_SERVER_URL` env var also
-   honored. Default URL is unchanged: `ws://127.0.0.1:7777`.
+- **In-room FOV cone / occlusion**. Cross-room visibility is already
+  filtered by `MysteryEnvironment.observe_location()`. Within a room, our
+  small props don't occlude meaningfully; adding ray-cast occlusion is
+  trivial later if we add wardrobes / shelves / large furniture that
+  warrants it.
+- **TAKE_OBJECT** is wired in the protocol but no key is bound for it in
+  the UI. Easy to add (e.g., extend the focus prompt to `[E] Examine | [G]
+  Take`).
+- **CHECK_ROUTE / TRAVEL_TIME / ANALYZE** actions exist in the env but
+  aren't surfaced in the UI yet. The protocol can be extended without any
+  Python-side change.
+- **VLM agent mode** (`--headless` Godot, frame capture, RPC actions for
+  benchmark recording). The protocol is already shaped to support it; what
+  remains is wiring Godot's headless `--render` flag and a frame-capture
+  loop that emits PNGs alongside `room`/`action_result` messages.
+- **Native exports** (`.app` / `.exe` / Linux binaries) and the M5 sidecar
+  pattern (Godot binary auto-launches PyInstaller-built server). Server
+  already honours `--port 0` + LISTEN sentinel, so the sidecar pattern is
+  unblocked.
+- **First-launch OpenAI key prompt** in Godot, persisting to user config
+  dir. Currently the user sets `OPENAI_API_KEY` in the server's environment
+  before launch.
 
-2. **`spawn.facing_deg` is `0.0`** (north / +X look direction). The 2D
-   layout uses `default_spawn = (W//2, H//2)` and doesn't pick a facing
-   direction; rather than invent one the server emits `0.0` and Godot
-   yaws there. M2 will likely set facing = "look toward the door you
-   entered through" once we add room transitions.
+## Acceptance check (manually verified)
 
-3. **No ceiling rendered.** Floor + walls + a directional light + ambient
-   environment is enough for a recognisable room and keeps the visual
-   simple. Adding a ceiling is a one-line change in `room_builder.gd` if
-   it's wanted — left out to honour `CLAUDE.md` rule 25 (no extras).
+- [x] `python -m server.godot_server --seed 42` runs and stays up.
+- [x] Stdout contains exactly one `LISTEN ws://...` line; no banner, no
+      log spam (`PYGAME_HIDE_SUPPORT_PROMPT=1` is set before any imports).
+- [x] `--port 0` binds a free port and the LISTEN line reflects it.
+- [x] Determinism: seed 42 → "Wine Pantry, kitchen cleaver, lipstick-stained
+      glass, wicker basket, wall mirror; Gareth Greystone alive, Linnea Juno
+      dead." Same on every run.
+- [x] Different seed yields a different room.
+- [x] examine_object returns a description.
+- [x] talk_to with a question triggers the env's interview path; multi-turn
+      history is preserved per character.
+- [x] accuse with the correct triple returns `correct=True`; with a wrong
+      triple returns `correct=False` and reveals the actual culprit.
+- [x] world_graph payload reflects visited rooms growing as the agent moves.
+- [x] inventory returns `[]` when empty.
+- [x] Server exits cleanly on SIGINT/SIGTERM.
+- [ ] **Godot end-to-end:** all UI panels (chat, inventory, accuse,
+      result) build and show correctly. Not validated on the dev sandbox
+      (no Godot binary). Tested by code review only — see "Godot
+      first-launch verification" below.
 
-4. **Walls are individual `BoxMesh` + `BoxShape3D` per WALL tile.** This
-   produces ~50 static bodies for an 18×13 room — perfectly fine for M1.
-   M3+ may want to merge runs of walls into single boxes for cleaner
-   physics scenes, but the AABB collision contract (`CLAUDE.md` rule 11)
-   is already exact this way.
+## Godot first-launch verification (please run)
 
-## Known limitations / explicit M1 non-goals
+On macOS, after starting the server in Terminal A:
 
-- **Doors are visible openings only.** A "D" tile produces a gap in the
-  wall; there is no trigger, no transition. Walking through it just
-  steps into the next gridless space. M3 wires up the `MOVE` action.
-- **No NPCs, clues, weapons, or interactables.** Even though the
-  generator places them, the M1 server intentionally does not serialize
-  `objects` or `characters` lists. The protocol field will be added in
-  M2 alongside Kenney asset loading.
-- **No headless / agent mode.** Godot M1 always opens a window. M3 adds
-  `--headless` + frame capture + RPC actions.
-- **No fog-of-war / FOV cone.** The whole spawn room is visible from
-  the moment it loads. M4 layers partial-observability rendering on top.
-- **No NPC-dialogue runtime dependency.** `npc_responder.py` is not
-  imported by the M1 server. The OpenAI BYOK plan documented in the
-  prompt's Distribution UX section applies starting M3 (when `talk`
-  becomes an action).
-- **No native exports.** `game/export_presets.cfg` is not committed.
-  M5 will set up the GitHub Actions matrix.
+1. `Godot --path .../game` — window opens, HUD shows "Connecting...".
+2. After ~1 sec the room renders. Wine Pantry. Crosshair visible. Hover
+   prompts appear when looking at objects/NPCs.
+3. Press E on the suspect (Gareth Greystone): chat panel opens, mouse
+   visible. Type a question, ENTER. Reply appears. Multiple turns work.
+   ESC closes the chat, mouse re-captures.
+4. Press TAB: inventory panel says `(0 items)`. TAB or ESC to close.
+5. Walk into the door floor-patch (north wall): minimap shows Wine Pantry
+   becoming `[x]` visited, Billiard Room becomes `[*]`. New room renders.
+6. Explore further. Find the marble bookend (the murder weapon).
+7. Press F: accuse modal opens. Type:
+     Suspect:  `Gareth Greystone`
+     Weapon:   `marble bookend`
+     Location: `Wine Pantry`
+   ENTER on Location. Result panel: `CORRECT accusation`, partial_score
+   `1.00 / 1.00`.
+8. ESC dismisses the result panel. Game-over state — you can keep walking
+   but the env's `is_solved` is True.
 
-## Things to verify on first F5 launch in Godot
-
-These were not exercised in the dev sandbox because no Godot binary was
-available there. A reviewer with Godot 4.3 should confirm:
-
-1. The project opens without script errors (Godot's import pass should
-   pick up the .tscn and .gd files; a `.godot/` cache will be created
-   on first open — that's expected and `.gitignore`able later).
-2. F5 launches the main scene, the window connects, and the HUD shows
-   `Room: Wine Pantry` (with seed 42).
-3. WASD moves the player on the XZ plane; mouse rotates view; ESC
-   releases capture; click recaptures.
-4. The player cannot clip through walls (AABB / capsule collision).
-5. The player can stand inside the door cell (it's walkable) — but
-   nothing happens when they do, and there's no wall blocking the
-   visible opening.
-
-If the project has script errors that I can't predict from static
-review, the most likely culprit is a Godot 4.x API rename — fixes are
-usually 1-line. Don't change the architecture to work around them; just
-adjust the offending call.
-
-## Where M2 should pick up first
-
-1. **Extend the protocol.** `room` should also include `objects: [{id,
-   name, x, y, kind}, ...]` and `characters: [{id, name, x, y, role}, ...]`.
-   The data is already in `state.objects` / `state.characters` and
-   `layout.objects` / `layout.characters`; serialize it the same way
-   doors are serialized today.
-2. **Mesh lookup table.** Map `kind` (e.g. "weapon:revolver",
-   "object:cigar_stub", "character:suspect") to a Kenney `.glb` filename
-   in `game/assets/`. Keep the table data-driven (`res://config/
-   mesh_map.json`) so the implementer doesn't have to recompile to add
-   one model.
-3. **Min-spacing in 3D.** The 2D rule is 3 tiles Chebyshev. With
-   `TILE_M = 2.0`, that's 6.0 m. Confirm the layout's existing 2D
-   spacing translates correctly; the server already enforces it before
-   serialization, so M2's job is just to render.
-4. **Object visibility invariant** (`CLAUDE.md` rule 5). When a clue is
-   `HIDDEN` or `DESTROYED`, still render its mesh in 3D. Don't filter
-   client-side based on evidence state. Don't even let the server filter
-   — the server should send all placed objects, with their evidence
-   metadata as a side field, and let the renderer decide visual styling
-   (e.g. dim colour for destroyed). This is the regression that ate the
-   most time in 2D.
-
-## Test artefacts (for reference)
-
-```
-$ uv run python -m server.godot_server --seed 42 --port 0 1>stdout.log 2>stderr.log &
-$ cat stdout.log
-LISTEN ws://127.0.0.1:44107
-
-$ uv run python -m mystery_world.godot_client --url ws://127.0.0.1:44107
-connected: ws://127.0.0.1:44107
-room:      Wine Pantry (loc_727630)
-size:      18 x 13
-doors:     1
-  -  north  ->  Billiard Room
-spawn:     (9.5, 6.5) facing 0 deg
-
-$ uv run python -m server.godot_server --seed 7 --port 0 1>stdout.log 2>stderr.log &
-$ uv run python -m mystery_world.godot_client --url <chosen-url>
-room:      Attic Storage (loc_302686)
-doors:     2
-  -  north  ->  Boat House
-  -  south  ->  Observatory Deck
-```
+If any of this fails, paste the Godot Output panel contents here.

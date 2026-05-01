@@ -1,15 +1,26 @@
 """WebSocket server that exposes a `MysteryEnvironment` to a Godot 4 client.
 
-Milestone 1 protocol:
+Protocol:
 
   Client -> Server:
-    {"type": "get_current_room", "request_id": "..."}
-    {"type": "ping",             "request_id": "..."}
+    {"type": "ping",                 "request_id": "..."}
+    {"type": "get_current_room",     "request_id": "..."}
+    {"type": "move_to_room",         "request_id": "...", "target_location_id": str}
+    {"type": "examine_object",       "request_id": "...", "object_name": str}
+    {"type": "talk_to",              "request_id": "...", "character_name": str, "question": str}
+    {"type": "take_object",          "request_id": "...", "object_name": str}
+    {"type": "inventory",            "request_id": "..."}
+    {"type": "accuse",               "request_id": "...", "suspect_name": str, "weapon_name": str, "location_name": str}
+    {"type": "world_graph",          "request_id": "..."}
 
   Server -> Client:
-    {"type": "room",  "request_id": ..., room fields ...}
-    {"type": "pong",  "request_id": ...}
-    {"type": "error", "request_id": ..., "error": "..."}
+    {"type": "pong",                 "request_id": ...}
+    {"type": "room",                 "request_id": ..., room fields, "world_graph": [...]}
+    {"type": "action_result",        "request_id": ..., "success": bool, "observation": str, "evidence_found": [...]}
+    {"type": "inventory",            "request_id": ..., "items": [...]}
+    {"type": "accusation_result",    "request_id": ..., "correct": bool, "details": {...}}
+    {"type": "world_graph",          "request_id": ..., "locations": [...]}
+    {"type": "error",                "request_id": ..., "error": str}
 
 stdout contract:
   Exactly one machine-parseable line is printed to stdout when the server is
@@ -21,9 +32,12 @@ stdout contract:
   discover the chosen port (when invoked with --port 0). All logs go to
   stderr; stdout has only the LISTEN line.
 
-The OpenAI key for `npc_responder` (used in later milestones) must reach this
-process via the OPENAI_API_KEY env var. The server itself never reads or
-persists the key.
+NPC dialogue (talk_to action):
+  If the OPENAI_API_KEY env var is set, an NPCResponder is attached to the
+  environment and `talk_to` returns LLM-generated NPC replies. Otherwise the
+  built-in deterministic template fallback is used. The server itself never
+  reads or persists the API key — it stays in the process environment and is
+  consumed by openai-sdk at request time.
 """
 
 from __future__ import annotations
@@ -49,6 +63,7 @@ import websockets
 from mystery_world import COMPLEXITY_PRESETS, ComplexityLevel
 from mystery_world.entities import CharacterRole
 from mystery_world.generator import generate_mystery
+from mystery_world.npc_responder import NPCResponder
 from mystery_world.renderer.layout import (
     Tile,
     build_room_layout,
@@ -103,10 +118,6 @@ def serialize_room(
     All objects and characters in the location are included, regardless of
     evidence state or alive/dead status (CLAUDE.md rule 5: always-visible).
     Visual styling is the renderer's job.
-
-    If `from_location_id` is given and the layout has a corresponding entry
-    in `spawn_from`, the player spawns at that door cell. Otherwise the
-    room's default spawn (center) is used.
     """
     state = env.state
     location = state.locations[location_id]
@@ -186,18 +197,87 @@ def serialize_room(
 
 
 class GodotServer:
-    def __init__(self, seed: int, complexity: ComplexityLevel):
+    def __init__(self, seed: int, complexity: ComplexityLevel, npc_model: str | None):
         self.seed = seed
         self.complexity = complexity
         config = COMPLEXITY_PRESETS[complexity]
         logger.info("generating mystery: seed=%d complexity=%s", seed, complexity.name)
         world = generate_mystery(config, seed)
         self.env = MysteryEnvironment(world)
+
+        # Visited rooms — fog-of-war on the client side.
+        self.visited: set[str] = {self.env.agent_location_id}
+
+        # Attach an NPC responder if an OpenAI API key is available. The
+        # responder reads OPENAI_API_KEY from the environment itself; we
+        # never read or persist the key here.
+        if os.environ.get("OPENAI_API_KEY") and npc_model:
+            try:
+                base_url = os.environ.get("OPENAI_BASE_URL") or None
+                responder = NPCResponder(
+                    base_url=base_url,
+                    model=npc_model,
+                )
+                self.env.set_npc_responder(responder)
+                logger.info(
+                    "NPC responder attached: model=%s base_url=%s",
+                    npc_model,
+                    base_url or "openai-default",
+                )
+            except Exception:
+                logger.exception("failed to attach NPC responder; using template fallback")
+        else:
+            logger.info("OPENAI_API_KEY not set; talk_to will use deterministic template fallback")
+
         logger.info(
             "world ready: %d locations, agent at %s",
             len(world.locations),
             self.env.agent_location_id,
         )
+
+    # ---------------------------------------------------------------- payload helpers
+
+    def _world_graph(self) -> list[dict[str, Any]]:
+        out = []
+        for lid, loc in self.env.state.locations.items():
+            out.append(
+                {
+                    "id": lid,
+                    "name": loc.name,
+                    "adjacents": list(loc.adjacent_ids),
+                    "visited": lid in self.visited,
+                    "current": lid == self.env.agent_location_id,
+                }
+            )
+        out.sort(key=lambda x: x["name"])
+        return out
+
+    def _room_payload(
+        self, request_id: str, from_location_id: str | None = None
+    ) -> dict[str, Any]:
+        room = serialize_room(
+            self.env, self.env.agent_location_id, from_location_id=from_location_id
+        )
+        return {
+            "type": "room",
+            "request_id": request_id,
+            "world_graph": self._world_graph(),
+            **room,
+        }
+
+    @staticmethod
+    def _action_result_payload(
+        request_id: str, result: Any
+    ) -> dict[str, Any]:
+        return {
+            "type": "action_result",
+            "request_id": request_id,
+            "success": bool(result.success),
+            "observation": result.observation,
+            "evidence_found": list(result.evidence_found),
+        }
+
+    # ---------------------------------------------------------------- network loop
 
     async def handle_client(self, ws: Any) -> None:
         peer = ws.remote_address
@@ -221,92 +301,157 @@ class GodotServer:
         msg_type = msg.get("type")
         request_id = msg.get("request_id", "")
 
-        if msg_type == "ping":
-            await ws.send(json.dumps({"type": "pong", "request_id": request_id}))
-            return
+        try:
+            if msg_type == "ping":
+                await ws.send(
+                    json.dumps({"type": "pong", "request_id": request_id})
+                )
 
-        if msg_type == "get_current_room":
-            try:
-                room = serialize_room(self.env, self.env.agent_location_id)
-            except Exception as exc:
-                logger.exception("serialize_room failed")
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "error",
-                            "request_id": request_id,
-                            "error": str(exc),
-                        }
-                    )
-                )
-                return
-            payload = {"type": "room", "request_id": request_id, **room}
-            await ws.send(json.dumps(payload))
-            return
+            elif msg_type == "get_current_room":
+                await ws.send(json.dumps(self._room_payload(request_id)))
 
-        if msg_type == "move_to_room":
-            target = str(msg.get("target_location_id", ""))
-            if not target:
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "error",
-                            "request_id": request_id,
-                            "error": "move_to_room requires target_location_id",
-                        }
-                    )
-                )
-                return
-            prev = self.env.agent_location_id
-            result = self.env.step(AgentAction.MOVE, target_location=target)
-            if not result.success:
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "error",
-                            "request_id": request_id,
-                            "error": result.observation,
-                        }
-                    )
-                )
-                return
-            try:
-                room = serialize_room(
-                    self.env,
-                    self.env.agent_location_id,
-                    from_location_id=prev,
-                )
-            except Exception as exc:
-                logger.exception("serialize_room (post-move) failed")
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "error",
-                            "request_id": request_id,
-                            "error": str(exc),
-                        }
-                    )
-                )
-                return
-            logger.info("agent moved %s -> %s", prev, self.env.agent_location_id)
-            payload = {"type": "room", "request_id": request_id, **room}
-            await ws.send(json.dumps(payload))
-            return
+            elif msg_type == "move_to_room":
+                await self._handle_move(ws, request_id, msg)
 
-        await ws.send(
-            json.dumps(
-                {
-                    "type": "error",
+            elif msg_type == "examine_object":
+                obj_name = str(msg.get("object_name", ""))
+                result = self.env.step(AgentAction.EXAMINE_OBJECT, object_name=obj_name)
+                await ws.send(
+                    json.dumps(self._action_result_payload(request_id, result))
+                )
+
+            elif msg_type == "talk_to":
+                char_name = str(msg.get("character_name", ""))
+                question = str(msg.get("question", ""))
+                # Run blocking LLM call in a thread so we don't stall other
+                # clients (and the asyncio event loop).
+                result = await asyncio.to_thread(
+                    self.env.step,
+                    AgentAction.TALK_TO,
+                    character_name=char_name,
+                    question=question,
+                )
+                await ws.send(
+                    json.dumps(self._action_result_payload(request_id, result))
+                )
+
+            elif msg_type == "take_object":
+                obj_name = str(msg.get("object_name", ""))
+                result = self.env.step(AgentAction.TAKE_OBJECT, object_name=obj_name)
+                await ws.send(
+                    json.dumps(self._action_result_payload(request_id, result))
+                )
+
+            elif msg_type == "inventory":
+                items = []
+                for ev_id in self.env.agent_inventory:
+                    ev = self.env.state.evidence.get(ev_id)
+                    if ev is None:
+                        continue
+                    items.append(
+                        {
+                            "id": ev.id,
+                            "name": getattr(ev, "name", ev.id),
+                            "description": getattr(ev, "description", ""),
+                        }
+                    )
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "inventory",
+                            "request_id": request_id,
+                            "items": items,
+                        }
+                    )
+                )
+
+            elif msg_type == "accuse":
+                suspect = str(msg.get("suspect_name", ""))
+                weapon = str(msg.get("weapon_name", ""))
+                location = str(msg.get("location_name", ""))
+                result = self.env.step(
+                    AgentAction.ACCUSE,
+                    suspect_name=suspect,
+                    weapon_name=weapon,
+                    location_name=location,
+                )
+                payload = {
+                    "type": "accusation_result",
                     "request_id": request_id,
-                    "error": f"unknown message type: {msg_type!r}",
+                    "correct": bool(self.env.accusation_correct),
+                    "observation": result.observation,
+                    "details": result.details or {},
                 }
+                await ws.send(json.dumps(payload))
+
+            elif msg_type == "world_graph":
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "world_graph",
+                            "request_id": request_id,
+                            "locations": self._world_graph(),
+                        }
+                    )
+                )
+
+            else:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "request_id": request_id,
+                            "error": f"unknown message type: {msg_type!r}",
+                        }
+                    )
+                )
+        except Exception as exc:
+            logger.exception("dispatch failed for type=%r", msg_type)
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "error",
+                        "request_id": request_id,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
             )
+
+    async def _handle_move(self, ws: Any, request_id: str, msg: dict[str, Any]) -> None:
+        target = str(msg.get("target_location_id", ""))
+        if not target:
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "error",
+                        "request_id": request_id,
+                        "error": "move_to_room requires target_location_id",
+                    }
+                )
+            )
+            return
+        prev = self.env.agent_location_id
+        result = self.env.step(AgentAction.MOVE, target_location=target)
+        if not result.success:
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "error",
+                        "request_id": request_id,
+                        "error": result.observation,
+                    }
+                )
+            )
+            return
+        self.visited.add(self.env.agent_location_id)
+        logger.info("agent moved %s -> %s", prev, self.env.agent_location_id)
+        await ws.send(
+            json.dumps(self._room_payload(request_id, from_location_id=prev))
         )
 
 
 async def _run(host: str, port: int, server: GodotServer) -> None:
     async with websockets.serve(server.handle_client, host, port) as ws_server:
-        # Resolve the actual bound port (port=0 picks one)
         actual_port = port
         try:
             sockets = ws_server.sockets  # type: ignore[attr-defined]
@@ -315,9 +460,6 @@ async def _run(host: str, port: int, server: GodotServer) -> None:
         except Exception:
             pass
 
-        # The sidecar contract: one parseable LISTEN line on stdout, then
-        # nothing else on stdout. Godot M5 reads this line to discover the
-        # chosen port when launched with --port 0.
         sys.stdout.write(f"LISTEN ws://{host}:{actual_port}\n")
         sys.stdout.flush()
         logger.info("listening on ws://%s:%d", host, actual_port)
@@ -341,7 +483,7 @@ async def _run(host: str, port: int, server: GodotServer) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="MysteryArena Godot WebSocket server (Milestone 1)",
+        description="MysteryArena Godot WebSocket server",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
@@ -356,6 +498,12 @@ def main() -> None:
         default="EASY",
         choices=[c.name for c in ComplexityLevel],
     )
+    parser.add_argument(
+        "--npc-model",
+        default="gpt-4o-mini",
+        help="OpenAI-compatible model id for NPC dialogue (used only if "
+             "OPENAI_API_KEY is set; otherwise template fallback).",
+    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
@@ -365,7 +513,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    server = GodotServer(args.seed, ComplexityLevel[args.complexity])
+    server = GodotServer(args.seed, ComplexityLevel[args.complexity], args.npc_model)
     try:
         asyncio.run(_run(args.host, args.port, server))
     except KeyboardInterrupt:

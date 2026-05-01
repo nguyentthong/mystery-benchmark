@@ -40,6 +40,14 @@ const VICTIM_COLOR   := Color(0.70, 0.20, 0.20)
 const LABEL_FONT_SIZE := 32
 const LABEL_PIXEL_SIZE := 0.004
 
+const ASSET_MAP_PATH := "res://config/asset_map.json"
+
+# Loaded lazily via _load_asset_map(). When the user has not run the Kenney
+# download script, this stays {} and every entity falls back to a coloured
+# cube / capsule — no error.
+var _asset_map: Dictionary = {}
+var _asset_map_loaded: bool = false
+
 
 func build_from(room: Dictionary, tile_m: float) -> void:
 	# Clear previous geometry (transitions reuse the same RoomBuilder node).
@@ -53,6 +61,8 @@ func build_from(room: Dictionary, tile_m: float) -> void:
 	if width == 0 or height == 0 or tiles.is_empty():
 		push_error("room_builder: empty room payload")
 		return
+
+	_load_asset_map()
 
 	_add_floor(width, height, tile_m, tiles)
 	_add_walls(tiles, width, height, tile_m)
@@ -217,14 +227,18 @@ func _add_objects(objects: Array, tile_m: float) -> void:
 			"murder_weapon": color = MURDER_WEAPON_COLOR
 			_:               color = OBJECT_COLOR
 
-		var name: String = String(o.get("name", "object"))
+		var entity_name: String = String(o.get("name", "object"))
 		var ox: int = int(o.get("x", 0))
 		var oy: int = int(o.get("y", 0))
 
-		_spawn_prop_box(ox, oy, tile_m, color, name, 0.55)
+		var holder := _spawn_prop_box(ox, oy, tile_m, color, entity_name, 0.55)
+		holder.set_meta("entity_kind", "object")
+		holder.set_meta("entity_name", entity_name)
+		holder.set_meta("entity_id", String(o.get("id", "")))
+		holder.set_meta("entity_subkind", kind)
 
 
-func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: String, size: float) -> void:
+func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: String, size: float) -> Node3D:
 	var holder := Node3D.new()
 	holder.transform.origin = Vector3(
 		tx * tile_m + tile_m * 0.5,
@@ -233,31 +247,48 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 	)
 	add_child(holder)
 
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.roughness = 0.6
+	# Try to load a Kenney mesh first; fall back to a tinted cube on failure
+	# so the game stays playable even when no assets are installed.
+	var asset_path := _resolve_asset("objects", label_text, "")
+	var glb := _try_instance_asset(asset_path)
 
 	var body := StaticBody3D.new()
 	body.transform.origin = Vector3(0.0, size * 0.5, 0.0)
-	var box := BoxMesh.new()
-	box.size = Vector3(size, size, size)
-	box.material = mat
-	var mi := MeshInstance3D.new()
-	mi.mesh = box
-	body.add_child(mi)
-	var col := CollisionShape3D.new()
-	var shape := BoxShape3D.new()
-	shape.size = Vector3(size, size, size)
-	col.shape = shape
-	body.add_child(col)
-	holder.add_child(body)
 
+	if glb != null:
+		body.add_child(glb)
+		# Add a generic AABB collider sized to the slot — Kenney meshes don't
+		# ship with colliders. Approximate is fine; CLAUDE.md rule 11 only
+		# requires AABB collision, not pixel-perfect mesh collision.
+		var col := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(size, size, size)
+		col.shape = shape
+		body.add_child(col)
+	else:
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = color
+		mat.roughness = 0.6
+		var box := BoxMesh.new()
+		box.size = Vector3(size, size, size)
+		box.material = mat
+		var mi := MeshInstance3D.new()
+		mi.mesh = box
+		body.add_child(mi)
+		var col := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(size, size, size)
+		col.shape = shape
+		body.add_child(col)
+
+	holder.add_child(body)
 	_attach_label(holder, label_text, size + 0.3, color)
+	return holder
 
 
 func _add_characters(characters: Array, tile_m: float) -> void:
 	for c in characters:
-		var name: String = String(c.get("name", "?"))
+		var entity_name: String = String(c.get("name", "?"))
 		var role: String = String(c.get("role", "innocent"))
 		var alive: bool = bool(c.get("alive", true))
 		var cx: int = int(c.get("x", 0))
@@ -272,7 +303,12 @@ func _add_characters(characters: Array, tile_m: float) -> void:
 				"witness":  color = WITNESS_COLOR
 				_:          color = INNOCENT_COLOR
 
-		_spawn_character(cx, cy, tile_m, color, name, alive, role)
+		var holder := _spawn_character(cx, cy, tile_m, color, entity_name, alive, role)
+		holder.set_meta("entity_kind", "character")
+		holder.set_meta("entity_name", entity_name)
+		holder.set_meta("entity_id", String(c.get("id", "")))
+		holder.set_meta("entity_alive", alive)
+		holder.set_meta("entity_role", role)
 
 
 func _spawn_character(
@@ -283,7 +319,7 @@ func _spawn_character(
 	display_name: String,
 	alive: bool,
 	role: String,
-) -> void:
+) -> Node3D:
 	var holder := Node3D.new()
 	holder.transform.origin = Vector3(
 		tx * tile_m + tile_m * 0.5,
@@ -292,39 +328,46 @@ func _spawn_character(
 	)
 	add_child(holder)
 
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.roughness = 0.7
+	var asset_path := _resolve_asset("characters", display_name, role)
+	var glb := _try_instance_asset(asset_path)
 
 	var body := StaticBody3D.new()
-	var visual := MeshInstance3D.new()
-	var capsule := CapsuleMesh.new()
-	capsule.radius = 0.35
-	capsule.height = 1.7
-	capsule.material = mat
-	visual.mesh = capsule
-
-	var col := CollisionShape3D.new()
-	var shape := CapsuleShape3D.new()
-	shape.radius = 0.35
-	shape.height = 1.7
-	col.shape = shape
 
 	var label_prefix := ""
 	var label_height: float = 2.1
 	if alive:
-		# Standing capsule: center at half-height
 		body.transform.origin = Vector3(0.0, 0.85, 0.0)
 	else:
-		# Body lying flat: rotate 90 deg around Z so the long axis is along X.
-		# CLAUDE.md rule 14: bodies don't move. The capsule is parented to a
-		# rotated holder so its visual + collider stay aligned.
+		# CLAUDE.md rule 14: bodies don't move. Lay the visual flat by
+		# rotating the static body 90 deg around Z. Capsule capsule's long
+		# axis becomes horizontal; same rotation works for a humanoid GLB
+		# (the standing model becomes a fallen body).
 		body.transform.origin = Vector3(0.0, 0.35, 0.0)
 		body.rotation = Vector3(0.0, 0.0, deg_to_rad(90.0))
 		label_prefix = "[BODY] "
 		label_height = 1.2
 
-	body.add_child(visual)
+	if glb != null:
+		body.add_child(glb)
+	else:
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = color
+		mat.roughness = 0.7
+		var visual := MeshInstance3D.new()
+		var capsule := CapsuleMesh.new()
+		capsule.radius = 0.35
+		capsule.height = 1.7
+		capsule.material = mat
+		visual.mesh = capsule
+		body.add_child(visual)
+
+	# Capsule collider regardless of mesh source so the player can't walk
+	# through bodies / NPCs (CLAUDE.md rule 11).
+	var col := CollisionShape3D.new()
+	var shape := CapsuleShape3D.new()
+	shape.radius = 0.35
+	shape.height = 1.7
+	col.shape = shape
 	body.add_child(col)
 	holder.add_child(body)
 
@@ -334,6 +377,7 @@ func _spawn_character(
 		label_text = "[VICTIM] " + display_name
 
 	_attach_label(holder, label_text, label_height, color)
+	return holder
 
 
 func _attach_label(holder: Node3D, text: String, height: float, tint: Color) -> void:
@@ -347,6 +391,83 @@ func _attach_label(holder: Node3D, text: String, height: float, tint: Color) -> 
 	label.outline_modulate = Color(0, 0, 0)
 	label.transform.origin = Vector3(0.0, height, 0.0)
 	holder.add_child(label)
+
+
+# ---------------------------------------------------------------------------
+# Lighting
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Asset map (Kenney mesh loader)
+# ---------------------------------------------------------------------------
+#
+# `game/config/asset_map.json` maps logical entity kinds (objects, characters)
+# to .glb/.gltf paths under `game/assets/kenney/`. The room builder tries to
+# instance the mapped scene; if the file isn't there, it falls back to a
+# colored cube/capsule. This is the contract that lets the game ship without
+# bundled assets and still gain rich visuals when the user runs
+# `scripts/download_kenney_assets.sh`.
+
+func _load_asset_map() -> void:
+	if _asset_map_loaded:
+		return
+	_asset_map_loaded = true
+	if not FileAccess.file_exists(ASSET_MAP_PATH):
+		return
+	var f := FileAccess.open(ASSET_MAP_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var raw := f.get_as_text()
+	var parsed: Variant = JSON.parse_string(raw)
+	if typeof(parsed) == TYPE_DICTIONARY:
+		_asset_map = parsed
+
+
+func _resolve_asset(category: String, entity_name: String, role: String) -> String:
+	if _asset_map.is_empty():
+		return ""
+	var bucket: Variant = _asset_map.get(category)
+	if typeof(bucket) != TYPE_DICTIONARY:
+		return ""
+	var asset_root: String = String(_asset_map.get("asset_root", "res://assets/kenney/"))
+
+	# 1. Role-specific override (used for characters: by_role -> {suspect: ..., victim: ...})
+	if role != "" and bucket.has("by_role"):
+		var by_role: Dictionary = bucket.get("by_role", {})
+		if by_role.has(role):
+			return asset_root + String(by_role[role])
+
+	# 2. Substring patterns (used for objects: patterns -> [{contains, asset}])
+	if bucket.has("patterns"):
+		var patterns: Array = bucket.get("patterns", [])
+		var lower_name := entity_name.to_lower()
+		for p in patterns:
+			var needle := String(p.get("contains", "")).to_lower()
+			if needle != "" and needle in lower_name:
+				return asset_root + String(p.get("asset", ""))
+
+	# 3. Default for the category
+	if bucket.has("default"):
+		return asset_root + String(bucket["default"])
+
+	return ""
+
+
+func _try_instance_asset(path: String) -> Node3D:
+	if path == "":
+		return null
+	if not ResourceLoader.exists(path):
+		return null
+	var res := ResourceLoader.load(path)
+	if res == null:
+		return null
+	if res is PackedScene:
+		var node: Node = (res as PackedScene).instantiate()
+		if node is Node3D:
+			return node
+		else:
+			node.queue_free()
+	return null
 
 
 # ---------------------------------------------------------------------------

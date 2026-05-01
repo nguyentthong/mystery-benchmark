@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "_doc": [
+    "Maps logical entity kinds to .glb model paths inside game/assets/kenney/.",
+    "Filenames assume Kenney CC0 packs (Furniture Kit, Mini Characters, Weapon Pack).",
+    "If a path doesn't exist, room_builder.gd falls back to a colored cube/capsule.",
+    "Edit this file freely to point at different meshes — no code change needed."
+  ],
+  "asset_root": "res://assets/kenney/",
+  "characters": {
+    "default": "characters/character.glb",
+    "by_role": {
+      "suspect": "characters/character.glb",
+      "innocent": "characters/character.glb",
+      "witness": "characters/character.glb",
+      "victim": "characters/character.glb"
+    }
+  },
+  "objects": {
+    "default": "furniture/box.glb",
+    "patterns": [
+      {"contains": "cleaver",     "asset": "weapons/knife.glb"},
+      {"contains": "knife",       "asset": "weapons/knife.glb"},
+      {"contains": "letter opener","asset": "weapons/knife.glb"},
+      {"contains": "shears",      "asset": "weapons/scissors.glb"},
+      {"contains": "revolver",    "asset": "weapons/pistol.glb"},
+      {"contains": "candlestick", "asset": "furniture/candle.glb"},
+      {"contains": "decanter",    "asset": "furniture/bottle.glb"},
+      {"contains": "vial",        "asset": "furniture/bottle_small.glb"},
+      {"contains": "poker",       "asset": "weapons/iron_rod.glb"},
+      {"contains": "bookend",     "asset": "furniture/book.glb"},
+      {"contains": "rope",        "asset": "furniture/rope.glb"},
+      {"contains": "scarf",       "asset": "furniture/cloth.glb"},
+      {"contains": "statuette",   "asset": "furniture/statue.glb"},
+      {"contains": "boots",       "asset": "furniture/shoes.glb"},
+      {"contains": "envelope",    "asset": "furniture/letter.glb"},
+      {"contains": "letter",      "asset": "furniture/letter.glb"},
+      {"contains": "umbrella",    "asset": "furniture/umbrella.glb"},
+      {"contains": "watch",       "asset": "furniture/clock_small.glb"},
+      {"contains": "glove",       "asset": "furniture/glove.glb"},
+      {"contains": "spectacles",  "asset": "furniture/glasses.glb"},
+      {"contains": "diary",       "asset": "furniture/book.glb"},
+      {"contains": "key",         "asset": "furniture/key.glb"},
+      {"contains": "fingerprint", "asset": "furniture/paper.glb"},
+      {"contains": "ticket",      "asset": "furniture/paper.glb"},
+      {"contains": "bouquet",     "asset": "furniture/flowers.glb"},
+      {"contains": "chair",       "asset": "furniture/chair.glb"},
+      {"contains": "frame",       "asset": "furniture/painting.glb"},
+      {"contains": "ink",         "asset": "furniture/inkwell.glb"},
+      {"contains": "safe",        "asset": "furniture/safe.glb"},
+      {"contains": "chess",       "asset": "furniture/chess.glb"},
+      {"contains": "stub",        "asset": "furniture/cigar.glb"},
+      {"contains": "cigar",       "asset": "furniture/cigar.glb"},
+      {"contains": "tray",        "asset": "furniture/plate.glb"},
+      {"contains": "basket",      "asset": "furniture/basket.glb"},
+      {"contains": "mirror",      "asset": "furniture/mirror.glb"},
+      {"contains": "glass",       "asset": "furniture/glass.glb"},
+      {"contains": "receipt",     "asset": "furniture/paper.glb"}
+    ]
+  }
+}
