@@ -635,11 +635,23 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 				_apply_external_texture(glb, tex)
 			else:
 				_apply_tint(glb, color)
+			# "Overturned chair" / "knocked-over X" — tip the mesh on its
+			# back so it reads as fallen rather than upright. Done before
+			# adding to the body so the AABB we compute below reflects the
+			# rotated pose.
+			var lower_for_pose: String = label_text.to_lower()
+			if "overturned" in lower_for_pose or "toppled" in lower_for_pose or "knocked" in lower_for_pose:
+				glb.rotation = Vector3(deg_to_rad(90.0), 0.0, 0.0)
 			body.add_child(glb)
-			# Compute the actual visual top of the GLB so labels and any
-			# decorations sit at the right height, regardless of which
-			# Kenney mesh got loaded.
+			# Compute the actual visual extents of the GLB (including any
+			# rotation applied above) so labels, decorations, and the
+			# overturned-lift step work consistently.
 			glb_aabb = _compute_glb_aabb(glb)
+			# If we rotated and the AABB now extends below y=0, lift the
+			# mesh so its lowest point rests on the floor.
+			if glb_aabb.size != Vector3.ZERO and glb_aabb.position.y < 0.0:
+				glb.transform.origin.y -= glb_aabb.position.y
+				glb_aabb = _compute_glb_aabb(glb)
 			var glb_top: float = glb_aabb.position.y + glb_aabb.size.y if glb_aabb.size != Vector3.ZERO else size * s
 			visual_height = max(glb_top, size * s)
 			col_size = max(0.4, min(1.4, glb_top))
@@ -649,8 +661,11 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 			_decorate_table_if_applicable(holder, label_text, s, glb_aabb)
 			# Furniture with a clear "front" should face the room centre
 			# (so armchairs / sofas / chairs don't end up pointing at a
-			# wall after random tile placement).
-			if _is_face_inward_furniture(label_text):
+			# wall after random tile placement). Skip for overturned items
+			# — they're props on the floor, not seated furniture.
+			if _is_face_inward_furniture(label_text) and not (
+				"overturned" in lower_for_pose or "toppled" in lower_for_pose
+			):
 				holder.rotation.y = _yaw_to_room_center(tx, ty)
 		else:
 			# Cube fallback (the body offset must lift the centred mesh).
