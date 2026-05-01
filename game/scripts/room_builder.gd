@@ -347,19 +347,31 @@ func _build_wall_slots(width: int, height: int, tile_m: float, doors: Array, nee
 				continue
 			var pos: Vector3
 			var rot_y: float
+			# Each procedural wall item is built with its visible front on
+			# its local +Z. The rotation here aligns local +Z with the
+			# direction "into the room" so the item faces the player
+			# rather than the wall.
 			match w:
 				"north":
+					# Wall at low z; room at high z. Local +Z must map to
+					# world +Z, i.e. rotation 0.
 					pos = Vector3(size_x * f, y, 1.0 + poke)
-					rot_y = PI  # face +Z (south, into room)
+					rot_y = 0.0
 				"south":
+					# Wall at high z; room at low z. Local +Z -> world -Z,
+					# rotation pi.
 					pos = Vector3(size_x * f, y, size_z - 1.0 - poke)
-					rot_y = 0.0  # face -Z (north, into room)
+					rot_y = PI
 				"east":
+					# Wall at high x; room at low x. Local +Z -> world -X,
+					# rotation -pi/2.
 					pos = Vector3(size_x - 1.0 - poke, y, size_z * f)
-					rot_y = -PI * 0.5  # face -X (west, into room)
+					rot_y = -PI * 0.5
 				"west":
+					# Wall at low x; room at high x. Local +Z -> world +X,
+					# rotation +pi/2.
 					pos = Vector3(1.0 + poke, y, size_z * f)
-					rot_y = PI * 0.5  # face +X (east, into room)
+					rot_y = PI * 0.5
 				_:
 					continue
 			slots.append({"pos": pos, "rot_y": rot_y, "wall": w})
@@ -681,6 +693,13 @@ func _spawn_character(
 	holder.add_child(rig)
 	if not alive:
 		rig.rotation = Vector3(0.0, 0.0, deg_to_rad(90.0))
+		# After the 90° tip the body extends along world -X starting at
+		# the holder origin. Shift the rig forward by half the body
+		# length so the body is centred ON the holder — otherwise the
+		# blood pool (centred on the holder) and the body sit at offset
+		# positions and read as two separate "bodies" from a distance.
+		# Body length at SCALE 0.85 with head_top = LEG_H + TORSO_H + HEAD = 2.15.
+		rig.position.x = 2.15 * 0.85 * 0.5
 
 	# Per-character variation, deterministic from the display name so the
 	# same NPC always looks the same across reloads.
@@ -1171,23 +1190,28 @@ func _build_statuette() -> Node3D:
 
 
 func _build_fireplace() -> Node3D:
+	# Front of the fireplace is on local +Z (where the flames are visible).
 	var root := Node3D.new()
 	var stone := Color(0.55, 0.50, 0.45)
-	var dark := Color(0.18, 0.16, 0.15)
+	var dark := Color(0.10, 0.08, 0.07)
 	var fire := Color(1.0, 0.55, 0.15)
 	var ember := Color(0.85, 0.25, 0.10)
-	# Outer mantel surround (taller than wide)
+	# Outer mantel surround (taller than wide). Sits flush against the wall.
 	_add_block(root, Vector3(-0.65, 0.70, 0.0), Vector3(0.16, 1.40, 0.40), stone)
 	_add_block(root, Vector3( 0.65, 0.70, 0.0), Vector3(0.16, 1.40, 0.40), stone)
 	# Top mantel slab
 	_add_block(root, Vector3(0.0, 1.45, 0.0), Vector3(1.60, 0.18, 0.45), stone)
-	# Inner firebox (dark)
-	_add_block(root, Vector3(0.0, 0.65, -0.05), Vector3(1.10, 1.20, 0.30), dark)
-	# Logs and flame
-	_add_block(root, Vector3(-0.20, 0.18, 0.0), Vector3(0.50, 0.10, 0.10), Color(0.30, 0.18, 0.10))
-	_add_block(root, Vector3( 0.20, 0.18, 0.0), Vector3(0.50, 0.10, 0.10), Color(0.25, 0.15, 0.08))
-	_add_block(root, Vector3(0.0, 0.35, 0.0), Vector3(0.50, 0.30, 0.20), fire)
-	_add_block(root, Vector3(0.0, 0.55, 0.0), Vector3(0.30, 0.20, 0.15), ember)
+	# Firebox back wall (a thin slab at the rear of the cavity, against the
+	# wall side). Don't fill the whole interior or it hides the flames.
+	_add_block(root, Vector3(0.0, 0.65, -0.18), Vector3(1.10, 1.20, 0.04), dark)
+	# Firebox floor (dark, full depth)
+	_add_block(root, Vector3(0.0, 0.06, 0.0), Vector3(1.10, 0.10, 0.36), dark)
+	# Logs lying side-by-side, slightly forward in the cavity
+	_add_block(root, Vector3(-0.20, 0.18, 0.05), Vector3(0.50, 0.10, 0.12), Color(0.30, 0.18, 0.10))
+	_add_block(root, Vector3( 0.20, 0.18, 0.05), Vector3(0.50, 0.10, 0.12), Color(0.25, 0.15, 0.08))
+	# Flame, well forward so it pokes out past the logs (visible from the room).
+	_add_block(root, Vector3(0.0, 0.40, 0.08), Vector3(0.50, 0.40, 0.18), fire)
+	_add_block(root, Vector3(0.0, 0.55, 0.08), Vector3(0.30, 0.24, 0.14), ember)
 	return root
 
 
