@@ -16,6 +16,7 @@ extends CanvasLayer
 
 signal talk_submitted(character_name: String, question: String)
 signal accusation_submitted(suspect: String, weapon: String, location: String)
+signal start_game_requested(mode: String, seed: String, openai_api_key: String)
 
 # always-on
 var _fps_label: Label
@@ -50,6 +51,11 @@ var _result_modal_text: RichTextLabel
 var _case_panel: Control
 var _case_text: RichTextLabel
 
+var _start_panel: Control
+var _start_seed_input: LineEdit
+var _start_api_key_input: LineEdit
+var _start_mode_buttons: ButtonGroup
+
 
 func _ready() -> void:
 	_build_always_on()
@@ -59,6 +65,7 @@ func _ready() -> void:
 	_build_accuse_panel()
 	_build_accusation_result_panel()
 	_build_case_panel()
+	_build_start_panel()
 
 
 # =============================================================================
@@ -588,3 +595,129 @@ func hide_all_modals() -> void:
 	if _accuse_panel: _accuse_panel.visible = false
 	if _result_modal_panel: _result_modal_panel.visible = false
 	if _case_panel: _case_panel.visible = false
+	# Note: start panel is intentionally NOT hidden here. It's a pre-game
+	# screen, controlled separately by show_start_form / hide_start_form.
+
+
+# =============================================================================
+# Start form (mode + seed + api key)
+# =============================================================================
+
+func _build_start_panel() -> void:
+	_start_panel = _make_modal_root()
+	var v := _make_modal_box(_start_panel, Vector2(640, 500))
+
+	var title := Label.new()
+	title.add_theme_font_size_override("font_size", 26)
+	title.text = "MysteryArena 3D"
+	v.add_child(title)
+
+	var subtitle := Label.new()
+	subtitle.add_theme_font_size_override("font_size", 14)
+	subtitle.modulate = Color(0.85, 0.85, 0.85)
+	subtitle.text = "First-person procedural murder mystery."
+	v.add_child(subtitle)
+
+	v.add_child(_make_spacer(8))
+
+	# Mode
+	var mode_label := Label.new()
+	mode_label.add_theme_font_size_override("font_size", 14)
+	mode_label.text = "Mode:"
+	v.add_child(mode_label)
+
+	_start_mode_buttons = ButtonGroup.new()
+	var human_btn := CheckBox.new()
+	human_btn.text = "Play yourself"
+	human_btn.button_group = _start_mode_buttons
+	human_btn.button_pressed = true
+	human_btn.set_meta("mode", "human")
+	v.add_child(human_btn)
+
+	var vlm_btn := CheckBox.new()
+	vlm_btn.text = "Watch a VLM agent  (coming soon)"
+	vlm_btn.button_group = _start_mode_buttons
+	vlm_btn.disabled = true
+	vlm_btn.set_meta("mode", "vlm")
+	v.add_child(vlm_btn)
+
+	v.add_child(_make_spacer(8))
+
+	# Seed
+	var seed_row := HBoxContainer.new()
+	seed_row.add_theme_constant_override("separation", 8)
+	var seed_label := Label.new()
+	seed_label.text = "Seed:"
+	seed_label.custom_minimum_size = Vector2(120, 0)
+	seed_row.add_child(seed_label)
+	_start_seed_input = LineEdit.new()
+	_start_seed_input.placeholder_text = "leave blank for random"
+	_start_seed_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	seed_row.add_child(_start_seed_input)
+	v.add_child(seed_row)
+
+	# API key
+	var key_row := HBoxContainer.new()
+	key_row.add_theme_constant_override("separation", 8)
+	var key_label := Label.new()
+	key_label.text = "OpenAI key:"
+	key_label.custom_minimum_size = Vector2(120, 0)
+	key_row.add_child(key_label)
+	_start_api_key_input = LineEdit.new()
+	_start_api_key_input.placeholder_text = "sk-... (optional; deterministic NPCs without it)"
+	_start_api_key_input.secret = true
+	_start_api_key_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	key_row.add_child(_start_api_key_input)
+	v.add_child(key_row)
+
+	var key_help := Label.new()
+	key_help.add_theme_font_size_override("font_size", 12)
+	key_help.modulate = Color(0.75, 0.75, 0.75)
+	key_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	key_help.text = "The key is held in this process only — not written to disk."
+	v.add_child(key_help)
+
+	v.add_child(_make_spacer(12))
+
+	var start_btn := Button.new()
+	start_btn.text = "Start Game"
+	start_btn.add_theme_font_size_override("font_size", 18)
+	start_btn.custom_minimum_size = Vector2(0, 44)
+	start_btn.pressed.connect(_on_start_clicked)
+	v.add_child(start_btn)
+
+	_start_panel.visible = false
+	add_child(_start_panel)
+
+
+func _make_spacer(h: int) -> Control:
+	var c := Control.new()
+	c.custom_minimum_size = Vector2(0, h)
+	return c
+
+
+func _on_start_clicked() -> void:
+	var mode := "human"
+	if _start_mode_buttons:
+		var pressed := _start_mode_buttons.get_pressed_button()
+		if pressed and pressed.has_meta("mode"):
+			mode = String(pressed.get_meta("mode"))
+	emit_signal(
+		"start_game_requested",
+		mode,
+		_start_seed_input.text.strip_edges(),
+		_start_api_key_input.text.strip_edges(),
+	)
+
+
+func show_start_form() -> void:
+	_start_panel.visible = true
+	_start_seed_input.grab_focus()
+
+
+func hide_start_form() -> void:
+	_start_panel.visible = false
+
+
+func is_start_form_open() -> bool:
+	return _start_panel != null and _start_panel.visible

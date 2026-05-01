@@ -199,36 +199,51 @@ def serialize_room(
 
 class GodotServer:
     def __init__(self, seed: int, complexity: ComplexityLevel, npc_model: str | None):
+        self.npc_model = npc_model
+        self.new_game(
+            seed=seed,
+            complexity=complexity,
+            api_key=os.environ.get("OPENAI_API_KEY"),
+        )
+
+    def new_game(
+        self,
+        seed: int,
+        complexity: ComplexityLevel,
+        api_key: str | None,
+    ) -> None:
+        """(Re)generate the world from scratch and reset client-visible
+        state. Called once at startup and again whenever the Godot start-
+        form submits new parameters."""
         self.seed = seed
         self.complexity = complexity
         config = COMPLEXITY_PRESETS[complexity]
         logger.info("generating mystery: seed=%d complexity=%s", seed, complexity.name)
         world = generate_mystery(config, seed)
         self.env = MysteryEnvironment(world)
-
-        # Visited rooms — fog-of-war on the client side.
         self.visited: set[str] = {self.env.agent_location_id}
 
-        # Attach an NPC responder if an OpenAI API key is available. The
-        # responder reads OPENAI_API_KEY from the environment itself; we
-        # never read or persist the key here.
-        if os.environ.get("OPENAI_API_KEY") and npc_model:
+        # Attach an NPC responder if an OpenAI API key was supplied (either
+        # via the start-form or via the OPENAI_API_KEY env var). We never
+        # persist the key — it stays in process memory only.
+        if api_key and self.npc_model:
             try:
                 base_url = os.environ.get("OPENAI_BASE_URL") or None
                 responder = NPCResponder(
+                    api_key=api_key,
                     base_url=base_url,
-                    model=npc_model,
+                    model=self.npc_model,
                 )
                 self.env.set_npc_responder(responder)
                 logger.info(
                     "NPC responder attached: model=%s base_url=%s",
-                    npc_model,
+                    self.npc_model,
                     base_url or "openai-default",
                 )
             except Exception:
                 logger.exception("failed to attach NPC responder; using template fallback")
         else:
-            logger.info("OPENAI_API_KEY not set; talk_to will use deterministic template fallback")
+            logger.info("no OpenAI key supplied; talk_to uses deterministic template fallback")
 
         logger.info(
             "world ready: %d locations, agent at %s",
@@ -448,6 +463,27 @@ class GodotServer:
 
             elif msg_type == "case_file":
                 await ws.send(json.dumps(self._case_file_payload(request_id)))
+
+            elif msg_type == "new_game":
+                # Regenerate the world with the parameters from Godot's
+                # start form. seed=0 / missing -> randomise.
+                raw_seed = msg.get("seed")
+                if raw_seed in (None, "", 0):
+                    import secrets
+                    seed_int = secrets.randbits(31)
+                else:
+                    try:
+                        seed_int = int(raw_seed)
+                    except (TypeError, ValueError):
+                        seed_int = secrets.randbits(31)
+                api_key = msg.get("openai_api_key") or None
+                complexity_name = str(msg.get("complexity", self.complexity.name))
+                try:
+                    complexity = ComplexityLevel[complexity_name]
+                except KeyError:
+                    complexity = self.complexity
+                self.new_game(seed=seed_int, complexity=complexity, api_key=api_key)
+                await ws.send(json.dumps(self._room_payload(request_id)))
 
             else:
                 await ws.send(

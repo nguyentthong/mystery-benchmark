@@ -21,7 +21,7 @@ const Player      = preload("res://scripts/player.gd")
 const Hud         = preload("res://scripts/hud.gd")
 
 const DEFAULT_SERVER_URL := "ws://127.0.0.1:7777"
-const TILE_M := 2.0
+const TILE_M := 1.0  # 1 tile = 1 metre, so an 18x13 room is ~18x13 metres.
 
 var _ws: WSClient
 var _builder: RoomBuilder
@@ -29,9 +29,11 @@ var _player: CharacterBody3D
 var _hud: CanvasLayer
 
 var _transitioning: bool = false
-var _pending_action: String = ""   # "examine" | "talk" | "take" | "inventory" | "accuse" | ""
+var _pending_action: String = ""   # "examine" | "talk" | "take" | "inventory" | "case_file" | "accuse" | ""
 var _focused_entity: Dictionary = {}
 var _request_counter: int = 0
+var _briefing_shown: bool = false
+var _game_over: bool = false
 
 
 func _ready() -> void:
@@ -41,6 +43,7 @@ func _ready() -> void:
 	_hud = Hud.new()
 	_hud.talk_submitted.connect(_on_talk_submitted)
 	_hud.accusation_submitted.connect(_on_accusation_submitted)
+	_hud.start_game_requested.connect(_on_start_game_requested)
 	add_child(_hud)
 	_hud.set_status("Connecting to %s ..." % server_url)
 	_hud.set_room_name("(loading)")
@@ -57,7 +60,9 @@ func _ready() -> void:
 	_ws.connection_closed.connect(_on_disconnected)
 	add_child(_ws)
 
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# Mouse stays visible while the start form is open; player physics is
+	# disabled until the world arrives (no _player exists yet anyway).
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
 func _add_safety_floor() -> void:
@@ -92,10 +97,23 @@ func _resolve_server_url() -> String:
 # =============================================================================
 
 func _on_connected() -> void:
-	print("[main] connected; requesting current room")
-	_hud.set_status("Loading room ...")
-	var rid := _next_rid("init")
-	_ws.send_json({"type": "get_current_room", "request_id": rid})
+	print("[main] connected; showing start form")
+	_hud.set_status("")
+	_hud.show_start_form()
+
+
+func _on_start_game_requested(_mode: String, seed: String, openai_api_key: String) -> void:
+	print("[main] new_game requested seed=%s key_provided=%s" % [seed, str(openai_api_key != "")])
+	_hud.set_status("Starting new game ...")
+	_briefing_shown = false
+	_game_over = false
+	_ws.send_json({
+		"type": "new_game",
+		"request_id": _next_rid("new"),
+		"seed": seed,
+		"openai_api_key": openai_api_key,
+		"complexity": "EASY",
+	})
 
 
 func _on_disconnected(code: int, reason: String) -> void:
@@ -163,7 +181,16 @@ func _apply_room(msg: Dictionary) -> void:
 	_hud.set_room_name(room_name)
 	_hud.set_status("")
 	_hud.hide_all_modals()
+	_hud.hide_start_form()
 	_set_transitioning(false)
+
+	# Auto-open the case file briefing on the very first room of a new game,
+	# the way the 2D version greets the player with the case explanation.
+	if not _briefing_shown:
+		_briefing_shown = true
+		_request_case_file()
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _on_door_entered(leads_to: String) -> void:
@@ -203,6 +230,11 @@ func _input(event: InputEvent) -> void:
 	if not key_event.pressed or key_event.echo:
 		return
 	var key: int = key_event.keycode
+
+	# Start form (pre-game): let LineEdits and the Start button handle
+	# everything. We don't intercept any keys here.
+	if _hud.is_start_form_open():
+		return
 
 	# When a typing modal is open, only ESC is intercepted globally — let the
 	# LineEdit consume everything else.
@@ -256,6 +288,11 @@ func _close_open_modal() -> void:
 		_hud.close_result()
 	elif _hud.is_accusation_result_open():
 		_hud.close_accusation_result()
+		# Game ends after the accusation result panel is dismissed.
+		if _game_over:
+			print("[main] game over — quitting")
+			get_tree().quit()
+			return
 	_set_modal_active(false)
 
 
@@ -344,6 +381,7 @@ func _apply_accusation_result(msg: Dictionary) -> void:
 		msg.get("details", {}),
 	)
 	_set_modal_active(true)
+	_game_over = true  # next dismissal of this panel quits the app
 
 
 func _set_modal_active(active: bool) -> void:
