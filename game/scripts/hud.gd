@@ -21,6 +21,7 @@ signal start_game_requested(mode: String, seed: String, openai_api_key: String)
 # always-on
 var _fps_label: Label
 var _room_label: Label
+var _budget_label: Label
 var _status_label: Label
 var _crosshair: Label
 var _hover_label: Label
@@ -75,10 +76,13 @@ func _ready() -> void:
 func _build_always_on() -> void:
 	_fps_label = _make_label(Vector2(10, 10), 16)
 	_room_label = _make_label(Vector2(10, 32), 22)
-	_status_label = _make_label(Vector2(10, 64), 14)
+	_budget_label = _make_label(Vector2(10, 60), 16)
+	_budget_label.modulate = Color(0.75, 0.95, 0.75)
+	_status_label = _make_label(Vector2(10, 84), 14)
 	_status_label.modulate = Color(1.0, 0.85, 0.55)
 	add_child(_fps_label)
 	add_child(_room_label)
+	add_child(_budget_label)
 	add_child(_status_label)
 
 	_crosshair = _make_label(Vector2.ZERO, 20)
@@ -132,6 +136,11 @@ func set_room_name(room_name: String) -> void:
 func set_status(text: String) -> void:
 	if _status_label:
 		_status_label.text = text
+
+
+func set_budget(remaining: int, taken: int) -> void:
+	if _budget_label:
+		_budget_label.text = "Actions: %d left  (%d taken)" % [remaining, taken]
 
 
 func update_focused_entity(info: Dictionary) -> void:

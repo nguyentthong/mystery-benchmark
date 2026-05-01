@@ -268,6 +268,12 @@ class GodotServer:
         out.sort(key=lambda x: x["name"])
         return out
 
+    def _status(self) -> dict[str, Any]:
+        return {
+            "actions_taken": self.env.actions_taken,
+            "budget_remaining": self.env.budget_remaining,
+        }
+
     def _room_payload(
         self, request_id: str, from_location_id: str | None = None
     ) -> dict[str, Any]:
@@ -278,6 +284,7 @@ class GodotServer:
             "type": "room",
             "request_id": request_id,
             "world_graph": self._world_graph(),
+            **self._status(),
             **room,
         }
 
@@ -331,9 +338,8 @@ class GodotServer:
             "budget_remaining": self.env.budget_remaining,
         }
 
-    @staticmethod
     def _action_result_payload(
-        request_id: str, result: Any
+        self, request_id: str, result: Any
     ) -> dict[str, Any]:
         return {
             "type": "action_result",
@@ -341,6 +347,7 @@ class GodotServer:
             "success": bool(result.success),
             "observation": result.observation,
             "evidence_found": list(result.evidence_found),
+            **self._status(),
         }
 
     # ---------------------------------------------------------------- network loop

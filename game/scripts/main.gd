@@ -122,6 +122,10 @@ func _on_disconnected(code: int, reason: String) -> void:
 
 
 func _on_message(msg: Dictionary) -> void:
+	# Budget / status fields piggy-back on most response types.
+	if msg.has("budget_remaining"):
+		_hud.set_budget(int(msg["budget_remaining"]), int(msg.get("actions_taken", 0)))
+
 	match msg.get("type", ""):
 		"room":
 			_apply_room(msg)
@@ -398,6 +402,33 @@ func _next_rid(prefix: String) -> String:
 	return "%s-%d" % [prefix, _request_counter]
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _hud:
 		_hud.set_fps(Engine.get_frames_per_second())
+	_track_npcs_to_player(delta)
+
+
+func _track_npcs_to_player(delta: float) -> void:
+	# Alive NPCs rotate to face the player so their eyes follow you across
+	# the room. Dead bodies stay in their fallen pose (CLAUDE.md rule 14:
+	# bodies don't move).
+	if _player == null or _builder == null:
+		return
+	var ppos: Vector3 = _player.global_position
+	var turn_speed: float = 4.0
+	for child in _builder.get_children():
+		if not child is Node3D:
+			continue
+		if not child.has_meta("entity_kind"):
+			continue
+		if String(child.get_meta("entity_kind")) != "character":
+			continue
+		if not bool(child.get_meta("entity_alive", true)):
+			continue
+		var holder := child as Node3D
+		var dir: Vector3 = ppos - holder.global_position
+		dir.y = 0.0
+		if dir.length() < 0.05:
+			continue
+		var target_yaw: float = atan2(dir.x, dir.z)
+		holder.rotation.y = lerp_angle(holder.rotation.y, target_yaw, clampf(turn_speed * delta, 0.0, 1.0))
