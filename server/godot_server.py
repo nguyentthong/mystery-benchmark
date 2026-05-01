@@ -174,8 +174,30 @@ def serialize_room(
             }
         )
 
+    spawn_facing_deg = 0.0
     if from_location_id and from_location_id in layout.spawn_from:
         spawn_x, spawn_y = layout.spawn_from[from_location_id]
+        # Face *away* from the wall containing the entry door so the rest
+        # of the room is in front of the player and the door is behind
+        # them. Without this the player can spawn staring at the very door
+        # they just walked through.
+        #
+        # Godot mapping (rotation.y, with player looking down local -Z):
+        #   0   -> world -Z = "north"
+        #   90  -> world +X = "east"
+        #   180 -> world +Z = "south"
+        #   -90 -> world -X = "west"
+        face_for_entry_wall = {
+            "north": 180.0,  # entered through N wall -> face S (into room)
+            "south": 0.0,    # entered through S wall -> face N
+            "east":  -90.0,  # entered through E wall -> face W
+            "west":  90.0,   # entered through W wall -> face E
+        }
+        for (dx, dy), adj_id in layout.doors.items():
+            if adj_id == from_location_id:
+                wall = _wall_for(dx, dy, layout.width, layout.height)
+                spawn_facing_deg = face_for_entry_wall.get(wall, 0.0)
+                break
     else:
         spawn_x, spawn_y = layout.default_spawn
 
@@ -192,7 +214,7 @@ def serialize_room(
         "spawn": {
             "x": float(spawn_x) + 0.5,
             "y": float(spawn_y) + 0.5,
-            "facing_deg": 0.0,
+            "facing_deg": spawn_facing_deg,
         },
     }
 
