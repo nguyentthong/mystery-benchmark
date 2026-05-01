@@ -509,10 +509,38 @@ func _try_instance_asset(path: String) -> Node3D:
 	if res is PackedScene:
 		var node: Node = (res as PackedScene).instantiate()
 		if node is Node3D:
+			_ensure_vertex_colors(node as Node3D)
 			return node
 		else:
 			node.queue_free()
 	return null
+
+
+func _ensure_vertex_colors(root: Node3D) -> void:
+	# Kenney's low-poly models encode their colours as per-vertex colours
+	# (instead of full textures). Godot's default StandardMaterial3D imports
+	# them with vertex_color_use_as_albedo=false, so meshes render white.
+	# Walk the imported scene and flip the flag on any material whose
+	# albedo texture is empty — leaves real-textured materials alone.
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		if node is MeshInstance3D:
+			var mi := node as MeshInstance3D
+			var mesh := mi.mesh
+			if mesh != null:
+				var n := mesh.get_surface_count()
+				for i in n:
+					var mat := mi.get_active_material(i)
+					if mat is StandardMaterial3D:
+						var sm := mat as StandardMaterial3D
+						if sm.albedo_texture == null:
+							# Duplicate so we don't mutate the cached resource.
+							var dup := sm.duplicate() as StandardMaterial3D
+							dup.vertex_color_use_as_albedo = true
+							mi.set_surface_override_material(i, dup)
+		for child in node.get_children():
+			stack.push_back(child)
 
 
 # ---------------------------------------------------------------------------
