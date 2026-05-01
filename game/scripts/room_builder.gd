@@ -616,6 +616,7 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 
 	var visual_height: float = size * 1.2
 	var col_size: float = size
+	var glb_aabb := AABB()  # captured for label/decoration centring
 
 	if not procedural.is_empty():
 		body.add_child(procedural["node"] as Node3D)
@@ -638,14 +639,14 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 			# Compute the actual visual top of the GLB so labels and any
 			# decorations sit at the right height, regardless of which
 			# Kenney mesh got loaded.
-			var aabb := _compute_glb_aabb(glb)
-			var glb_top: float = aabb.position.y + aabb.size.y if aabb.size != Vector3.ZERO else size * s
+			glb_aabb = _compute_glb_aabb(glb)
+			var glb_top: float = glb_aabb.position.y + glb_aabb.size.y if glb_aabb.size != Vector3.ZERO else size * s
 			visual_height = max(glb_top, size * s)
 			col_size = max(0.4, min(1.4, glb_top))
 			# Pass the full AABB so decoration helpers can use the actual
 			# centre and footprint of the loaded mesh (Kenney models often
 			# have their origin at a corner, not the centre).
-			_decorate_table_if_applicable(holder, label_text, s, aabb)
+			_decorate_table_if_applicable(holder, label_text, s, glb_aabb)
 			# Furniture with a clear "front" should face the room centre
 			# (so armchairs / sofas / chairs don't end up pointing at a
 			# wall after random tile placement).
@@ -678,8 +679,17 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 	holder.add_child(body)
 
 	# Label sits just above the visual (visual_height was set per-asset).
+	# Use the GLB's AABB centre for X/Z so labels stay above the actual
+	# mesh instead of the holder origin (Kenney models are sometimes
+	# off-centre — a rug or footstool can have its mesh extending mostly
+	# to one side of the holder origin).
 	var label_y: float = visual_height + 0.50
-	_attach_label(holder, label_text, label_y, color)
+	var label_x: float = 0.0
+	var label_z: float = 0.0
+	if glb_aabb.size != Vector3.ZERO:
+		label_x = glb_aabb.position.x + glb_aabb.size.x * 0.5
+		label_z = glb_aabb.position.z + glb_aabb.size.z * 0.5
+	_attach_label(holder, label_text, label_y, color, label_x, label_z)
 	return holder
 
 
@@ -1336,13 +1346,26 @@ func _build_vial() -> Node3D:
 
 
 func _build_rope() -> Node3D:
+	# Coiled rope: a stack of circular rings made from short segments
+	# arranged around a circle. Reads as a coil rather than a column.
 	var root := Node3D.new()
 	var rope := Color(0.55, 0.40, 0.22)
-	# Coiled rope (overlapping flat rings)
-	for i in 5:
-		var y: float = 0.04 + i * 0.07
-		_add_block(root, Vector3(0.0, y, 0.0), Vector3(0.36, 0.07, 0.36), rope)
-	# Hollow centre is implicit (we don't poke through it; it's "minecraft" enough)
+	var rope_dark := Color(0.42, 0.30, 0.16)
+	var ring_radius: float = 0.22
+	var n_segments: int = 16
+	var n_layers: int = 3
+	var seg_size: float = 0.075
+	for layer in n_layers:
+		var y: float = 0.04 + layer * 0.075
+		for i in n_segments:
+			var ang: float = i * TAU / n_segments
+			var x: float = cos(ang) * ring_radius
+			var z: float = sin(ang) * ring_radius
+			# Alternate the colour slightly so individual segments are visible.
+			var c: Color = rope if (i + layer) % 2 == 0 else rope_dark
+			_add_block(root, Vector3(x, y, z), Vector3(seg_size, 0.075, seg_size), c)
+	# A loose tail draping out to one side
+	_add_block(root, Vector3(ring_radius + 0.08, 0.06, 0.0), Vector3(0.18, 0.06, 0.06), rope)
 	return root
 
 
@@ -1519,10 +1542,35 @@ func _build_paper() -> Node3D:
 
 
 func _build_book() -> Node3D:
+	# Closed notebook / journal lying flat on a surface. Composite shape
+	# with a leather cover, page block, spine, decorative inlay strip,
+	# and a binding ribbon poking out — reads clearly as a book/journal
+	# rather than a brown box.
 	var root := Node3D.new()
-	_add_block(root, Vector3(0.0, 0.05, 0.0), Vector3(0.22, 0.10, 0.16), Color(0.30, 0.15, 0.12))
-	_add_block(root, Vector3(0.0, 0.08, 0.0), Vector3(0.18, 0.04, 0.14), Color(0.92, 0.88, 0.78))
-	_add_block(root, Vector3(-0.08, 0.10, 0.0), Vector3(0.02, 0.10, 0.16), Color(0.75, 0.40, 0.20))
+	var leather := Color(0.30, 0.15, 0.12)
+	var leather_dark := Color(0.22, 0.10, 0.08)
+	var pages := Color(0.94, 0.90, 0.78)
+	var inlay := Color(0.85, 0.65, 0.20)  # gold inlay strip
+	var ribbon := Color(0.55, 0.10, 0.15)
+
+	var w: float = 0.26
+	var d: float = 0.34
+	var h_cover: float = 0.025
+	var h_pages: float = 0.045
+	var h_total: float = h_cover * 2.0 + h_pages
+
+	# Bottom cover
+	_add_block(root, Vector3(0.0, h_cover * 0.5, 0.0), Vector3(w, h_cover, d), leather_dark)
+	# Page block (slightly inset)
+	_add_block(root, Vector3(0.0, h_cover + h_pages * 0.5, 0.0), Vector3(w - 0.02, h_pages, d - 0.02), pages)
+	# Top cover
+	_add_block(root, Vector3(0.0, h_cover + h_pages + h_cover * 0.5, 0.0), Vector3(w, h_cover, d), leather)
+	# Spine ridge along one long edge (raised slightly)
+	_add_block(root, Vector3(-w * 0.5 + 0.012, h_total * 0.5, 0.0), Vector3(0.024, h_total + 0.01, d), leather_dark)
+	# Gold inlay strip across the front cover
+	_add_block(root, Vector3(0.04, h_total + 0.001, 0.0), Vector3(0.10, 0.005, 0.10), inlay)
+	# Bookmark ribbon poking out of the bottom edge
+	_add_block(root, Vector3(0.0, h_cover + h_pages + 0.001, d * 0.5 + 0.05), Vector3(0.025, 0.005, 0.14), ribbon)
 	return root
 
 
@@ -1897,7 +1945,7 @@ func _hair_palette(idx: int) -> Color:
 	return palette[abs(idx) % palette.size()]
 
 
-func _attach_label(holder: Node3D, text: String, height: float, tint: Color) -> void:
+func _attach_label(holder: Node3D, text: String, height: float, tint: Color, x_offset: float = 0.0, z_offset: float = 0.0) -> void:
 	var label := Label3D.new()
 	label.text = text
 	label.font_size = LABEL_FONT_SIZE
@@ -1906,7 +1954,7 @@ func _attach_label(holder: Node3D, text: String, height: float, tint: Color) -> 
 	label.modulate = tint.lerp(Color(1, 1, 1), 0.4)
 	label.outline_size = 8
 	label.outline_modulate = Color(0, 0, 0)
-	label.transform.origin = Vector3(0.0, height, 0.0)
+	label.transform.origin = Vector3(x_offset, height, z_offset)
 	holder.add_child(label)
 
 
