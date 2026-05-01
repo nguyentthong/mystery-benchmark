@@ -642,9 +642,10 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 			var glb_top: float = aabb.position.y + aabb.size.y if aabb.size != Vector3.ZERO else size * s
 			visual_height = max(glb_top, size * s)
 			col_size = max(0.4, min(1.4, glb_top))
-			# If this prop is a table or desk, dress it up using the
-			# computed table top.
-			_decorate_table_if_applicable(holder, label_text, s, glb_top)
+			# Pass the full AABB so decoration helpers can use the actual
+			# centre and footprint of the loaded mesh (Kenney models often
+			# have their origin at a corner, not the centre).
+			_decorate_table_if_applicable(holder, label_text, s, aabb)
 			# Furniture with a clear "front" should face the room centre
 			# (so armchairs / sofas / chairs don't end up pointing at a
 			# wall after random tile placement).
@@ -1082,52 +1083,61 @@ func _is_face_inward_furniture(entity_name: String) -> bool:
 	return false
 
 
-func _decorate_table_if_applicable(holder: Node3D, entity_name: String, kenney_scale: float, table_top_y: float) -> void:
+func _decorate_table_if_applicable(holder: Node3D, entity_name: String, kenney_scale: float, aabb: AABB) -> void:
 	# Pair tables and desks with a wooden chair pulled up in front and a
-	# small set of decorations on the surface. table_top_y is the actual
-	# Y of the mesh top (computed via AABB of the loaded GLB) so books,
-	# candles, etc. sit on the surface instead of hovering above or
-	# clipping into it.
+	# small set of decorations on the surface. The aabb is the loaded
+	# Kenney mesh's actual bounding box (in holder-local space, with
+	# scale applied), so we can place objects relative to the *real*
+	# centre and footprint of the desk — Kenney mesh origins are often
+	# at a corner, not the geometric centre.
 	var lower := entity_name.to_lower()
 	var is_side_table: bool = "side table" in lower
 	var is_desk: bool = ("writing desk" in lower or "desk" in lower) and not is_side_table
-	# A "table" without "side" in its name (dining table) acts like a desk
-	# for chair placement.
 	var is_full_table: bool = ("table" in lower) and not is_side_table and not is_desk
 
 	if not (is_side_table or is_desk or is_full_table):
 		return
 
-	# Side tables don't get a paired chair — they live next to sofas /
-	# armchairs in the layout. Desks and full tables get a chair pulled
-	# up in front, centred.
+	if aabb.size == Vector3.ZERO:
+		return  # GLB had no meshes; nothing to decorate around
+
+	var center_x: float = aabb.position.x + aabb.size.x * 0.5
+	var center_z: float = aabb.position.z + aabb.size.z * 0.5
+	var top_y: float = aabb.position.y + aabb.size.y
+	var half_z: float = aabb.size.z * 0.5
+
+	# Chair: tucked in just past the front edge of the table along +Z
+	# from the table's centre. Our chair model has its backrest on -Z,
+	# so rotating it by π puts the seat opening toward the desk.
 	if is_desk or is_full_table:
 		var chair := _build_table_side_chair()
-		var chair_distance: float = (0.55 if is_desk else 0.40) * kenney_scale + 0.10
-		chair.transform.origin = Vector3(0.0, 0.0, chair_distance)
+		# Distance from the table's centre to the chair: just past the
+		# table's front edge (half_z) plus a small gap so the seat
+		# slides under the table top.
+		var chair_z: float = center_z + half_z + 0.10
+		chair.transform.origin = Vector3(center_x, 0.0, chair_z)
 		chair.rotation.y = PI
 		holder.add_child(chair)
 
-	# Decorations on top — keep light for side tables (one candle), more
-	# generous for desks (book + candle + inkwell).
-	var decor_y: float = max(table_top_y, 0.3)
+	# Decorations sit on the table top, anchored to the table's centre.
+	var decor_y: float = max(top_y, 0.3)
 	if is_side_table:
 		var candle := _build_small_candle()
-		candle.transform.origin = Vector3(0.0, decor_y, 0.0)
+		candle.transform.origin = Vector3(center_x, decor_y, center_z)
 		holder.add_child(candle)
 		return
 
-	# Desk / table decorations
+	# Desk / dining-table decorations
 	var book := _build_book()
-	book.transform.origin = Vector3(-0.15 * kenney_scale, decor_y, 0.05 * kenney_scale)
+	book.transform.origin = Vector3(center_x - 0.20, decor_y, center_z + 0.05)
 	book.rotation.y = deg_to_rad(15.0)
 	holder.add_child(book)
 	var candle := _build_small_candle()
-	candle.transform.origin = Vector3(0.20 * kenney_scale, decor_y, -0.05 * kenney_scale)
+	candle.transform.origin = Vector3(center_x + 0.22, decor_y, center_z - 0.08)
 	holder.add_child(candle)
 	if is_desk:
 		var ink := _build_inkbottle()
-		ink.transform.origin = Vector3(0.30 * kenney_scale, decor_y, 0.18 * kenney_scale)
+		ink.transform.origin = Vector3(center_x + 0.05, decor_y, center_z - 0.18)
 		holder.add_child(ink)
 
 
@@ -1238,6 +1248,10 @@ func _try_build_procedural_object(entity_name: String) -> Dictionary:
 		return {"node": _wrap_on_table(_build_inkbottle()), "height": 1.00}
 	if "chess" in lower:
 		return {"node": _wrap_on_table(_build_chessboard()), "height": 1.10}
+	# "lipstick-stained glass" / "wine glass" / "drinking glass" — a stem
+	# glass with a smear of lipstick on the rim.
+	if "lipstick" in lower or ("glass" in lower and "stained" in lower) or ("drinking glass" in lower) or ("wine glass" in lower):
+		return {"node": _wrap_on_table(_build_drinking_glass()), "height": 1.10}
 	return {}
 
 
@@ -1592,6 +1606,28 @@ func _build_inkbottle() -> Node3D:
 	# Spilled puddle
 	_add_block(root, Vector3(0.20, 0.005, 0.05), Vector3(0.30, 0.005, 0.20), ink)
 	_add_block(root, Vector3(0.30, 0.006, -0.05), Vector3(0.18, 0.005, 0.10), ink)
+	return root
+
+
+func _build_drinking_glass() -> Node3D:
+	# Stem glass with a lipstick smear on the rim.
+	var root := Node3D.new()
+	var glass := Color(0.85, 0.92, 0.95)
+	var liquid := Color(0.55, 0.10, 0.18)  # red wine
+	var lipstick := Color(0.75, 0.10, 0.20)
+	# Foot (round base, approximated as a flat square)
+	_add_block(root, Vector3(0.0, 0.012, 0.0), Vector3(0.10, 0.025, 0.10), glass)
+	# Stem
+	_add_block(root, Vector3(0.0, 0.10, 0.0), Vector3(0.025, 0.16, 0.025), glass)
+	# Bowl (the cup)
+	_add_block(root, Vector3(0.0, 0.24, 0.0), Vector3(0.10, 0.10, 0.10), glass)
+	# Liquid level inside the bowl
+	_add_block(root, Vector3(0.0, 0.22, 0.0), Vector3(0.085, 0.06, 0.085), liquid)
+	# Rim (slightly wider band at the top of the bowl)
+	_add_block(root, Vector3(0.0, 0.31, 0.0), Vector3(0.105, 0.012, 0.105), glass)
+	# Lipstick mark on the front-right of the rim
+	_add_block(root, Vector3(0.04, 0.31, 0.04), Vector3(0.025, 0.014, 0.022), lipstick)
+	_add_block(root, Vector3(0.05, 0.30, 0.045), Vector3(0.018, 0.020, 0.014), lipstick)
 	return root
 
 
