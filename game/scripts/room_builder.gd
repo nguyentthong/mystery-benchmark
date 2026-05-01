@@ -223,7 +223,7 @@ func _on_door_body_entered(body: Node, leads_to: String) -> void:
 const WALL_MOUNT_PATTERNS := ["mirror", "curtain", "window", "painting", "frame", "ledge"]
 # Free-standing items that belong against a wall but on the floor (radiator,
 # bookcase). Same routing as wall-mounted but with a floor-level slot.
-const WALL_ADJACENT_PATTERNS := ["radiator", "bookcase", "shelf of books"]
+const WALL_ADJACENT_PATTERNS := ["radiator", "bookcase", "shelf of books", "fireplace", "mantel"]
 
 
 func _is_wall_mounted(entity_name: String) -> bool:
@@ -742,7 +742,15 @@ func _spawn_character(
 	var sit_y: float = 0.42  # chair-seat top, in rig-local metres
 	var leg_top: float
 	if is_seated:
-		_add_chair_in_rig(rig, sit_y, hair_color)
+		# Pick a seat style. Writing always uses a small wooden chair so it
+		# fits under the desk; reading / idle / headphones cycle through
+		# wooden / armchair / sofa for visual variety.
+		var seat_style: int
+		if act_writing:
+			seat_style = 0
+		else:
+			seat_style = abs(seed_int >> 8) % 3
+		_add_chair_in_rig(rig, sit_y, hair_color, seat_style, shirt_color)
 		leg_top = sit_y  # torso starts at chair seat
 	else:
 		leg_top = LEG_H
@@ -1481,44 +1489,87 @@ func _add_blood_pool(parent: Node3D) -> void:
 		_add_block(parent, s["pos"], s["size"], s["c"])
 
 
-func _add_chair_in_rig(rig: Node3D, sit_y: float, accent: Color) -> void:
-	# Build a simple wooden chair attached to the rig so it rotates with the
-	# character (otherwise the backrest would point a fixed direction while
-	# the character swivels to track the player).
+func _add_chair_in_rig(rig: Node3D, sit_y: float, accent: Color, style: int, shirt_color: Color) -> void:
+	# style 0 -> simple wooden chair (slim, slips under desks)
+	# style 1 -> upholstered armchair (puffy, two arm rests, tall back)
+	# style 2 -> sofa (extra-wide cushioned base + arm rests)
+	match style:
+		1:
+			_add_armchair(rig, sit_y, accent, shirt_color)
+		2:
+			_add_sofa(rig, sit_y, accent, shirt_color)
+		_:
+			_add_wooden_chair(rig, sit_y, accent)
+
+
+func _add_wooden_chair(rig: Node3D, sit_y: float, accent: Color) -> void:
 	var wood := Color(0.30, 0.20, 0.12)
 	var seat_size: float = 0.55
 	var seat_thickness: float = 0.06
-	# Seat
-	_add_block(
-		rig,
-		Vector3(0.0, sit_y, 0.0),
-		Vector3(seat_size, seat_thickness, seat_size),
-		wood,
-	)
-	# Four legs from floor up to seat
+	_add_block(rig, Vector3(0.0, sit_y, 0.0), Vector3(seat_size, seat_thickness, seat_size), wood)
 	var leg_inset: float = seat_size * 0.5 - 0.06
 	for sx in [-1, 1]:
 		for sz in [-1, 1]:
-			_add_block(
-				rig,
-				Vector3(sx * leg_inset, sit_y * 0.5, sz * leg_inset),
-				Vector3(0.05, sit_y, 0.05),
-				wood,
-			)
-	# Backrest behind the seat (rig-local +Z is forward, so backrest is at -Z).
-	_add_block(
-		rig,
-		Vector3(0.0, sit_y + 0.40, -seat_size * 0.5 + 0.04),
-		Vector3(seat_size, 0.80, 0.06),
-		wood.darkened(0.05),
-	)
-	# Two cushion-coloured stripes for visual interest (matches accent slightly)
-	_add_block(
-		rig,
-		Vector3(0.0, sit_y + 0.06, 0.0),
-		Vector3(seat_size * 0.85, 0.02, seat_size * 0.85),
-		accent.darkened(0.5),
-	)
+			_add_block(rig, Vector3(sx * leg_inset, sit_y * 0.5, sz * leg_inset), Vector3(0.05, sit_y, 0.05), wood)
+	_add_block(rig, Vector3(0.0, sit_y + 0.40, -seat_size * 0.5 + 0.04), Vector3(seat_size, 0.80, 0.06), wood.darkened(0.05))
+	_add_block(rig, Vector3(0.0, sit_y + 0.06, 0.0), Vector3(seat_size * 0.85, 0.02, seat_size * 0.85), accent.darkened(0.5))
+
+
+func _add_armchair(rig: Node3D, sit_y: float, accent: Color, shirt_color: Color) -> void:
+	# Wide, padded chair with arm rests and a tall back. Seat slightly
+	# raised by the cushion thickness so the rider visually sits on top.
+	var wood := Color(0.32, 0.22, 0.14)
+	var fabric := shirt_color.darkened(0.45)
+	if fabric.r < 0.18 and fabric.g < 0.18 and fabric.b < 0.18:
+		fabric = Color(0.40, 0.30, 0.25)  # avoid near-black
+	var w: float = 0.95
+	var d: float = 0.85
+	# Solid base block (hides legs — reads as upholstery)
+	_add_block(rig, Vector3(0.0, (sit_y - 0.05) * 0.5, 0.0), Vector3(w, sit_y - 0.05, d), fabric.darkened(0.10))
+	# Cushioned seat
+	_add_block(rig, Vector3(0.0, sit_y, 0.0), Vector3(w * 0.92, 0.10, d * 0.85), fabric)
+	# Tall back rest (cushioned)
+	_add_block(rig, Vector3(0.0, sit_y + 0.55, -d * 0.5 + 0.10), Vector3(w * 0.95, 1.10, 0.20), fabric)
+	# Two arm rests
+	for sx in [-1, 1]:
+		_add_block(rig, Vector3(sx * (w * 0.5 - 0.06), sit_y + 0.20, 0.05), Vector3(0.12, 0.30, d * 0.80), fabric.darkened(0.08))
+	# Wood feet poking out at the corners
+	for sx in [-1, 1]:
+		for sz in [-1, 1]:
+			_add_block(rig, Vector3(sx * (w * 0.5 - 0.06), 0.04, sz * (d * 0.5 - 0.06)), Vector3(0.08, 0.08, 0.08), wood)
+	# Accent piping along the seat front
+	_add_block(rig, Vector3(0.0, sit_y + 0.05, d * 0.5 * 0.85), Vector3(w * 0.92, 0.02, 0.02), accent.darkened(0.30))
+
+
+func _add_sofa(rig: Node3D, sit_y: float, accent: Color, shirt_color: Color) -> void:
+	# Like the armchair but wider — three cushion segments along the seat
+	# and back, plus arm rests at both ends. Character sits in the middle.
+	var wood := Color(0.32, 0.22, 0.14)
+	var fabric := shirt_color.darkened(0.45)
+	if fabric.r < 0.18 and fabric.g < 0.18 and fabric.b < 0.18:
+		fabric = Color(0.40, 0.30, 0.25)
+	var w: float = 1.85
+	var d: float = 0.85
+	# Solid base
+	_add_block(rig, Vector3(0.0, (sit_y - 0.05) * 0.5, 0.0), Vector3(w, sit_y - 0.05, d), fabric.darkened(0.10))
+	# Three seat cushions (a faint gap between them)
+	var cushion_w: float = (w * 0.92 - 0.06) / 3.0
+	for i in 3:
+		var cx: float = -w * 0.5 * 0.92 + cushion_w * 0.5 + i * (cushion_w + 0.03)
+		_add_block(rig, Vector3(cx, sit_y, 0.0), Vector3(cushion_w, 0.10, d * 0.85), fabric)
+	# Three back cushions (tall)
+	for i in 3:
+		var cx: float = -w * 0.5 * 0.92 + cushion_w * 0.5 + i * (cushion_w + 0.03)
+		_add_block(rig, Vector3(cx, sit_y + 0.55, -d * 0.5 + 0.10), Vector3(cushion_w, 1.10, 0.20), fabric.darkened(0.05))
+	# Arm rests at both ends
+	for sx in [-1, 1]:
+		_add_block(rig, Vector3(sx * (w * 0.5 - 0.06), sit_y + 0.20, 0.05), Vector3(0.12, 0.30, d * 0.80), fabric.darkened(0.08))
+	# Wood feet
+	for sx in [-1, 1]:
+		for sz in [-1, 1]:
+			_add_block(rig, Vector3(sx * (w * 0.5 - 0.06), 0.04, sz * (d * 0.5 - 0.06)), Vector3(0.08, 0.08, 0.08), wood)
+	# Accent piping along the seat front
+	_add_block(rig, Vector3(0.0, sit_y + 0.05, d * 0.5 * 0.85), Vector3(w * 0.92, 0.02, 0.02), accent.darkened(0.30))
 
 
 func _add_block(parent: Node3D, pos: Vector3, size: Vector3, color: Color) -> void:
