@@ -52,6 +52,9 @@ var _result_modal_text: RichTextLabel
 var _case_panel: Control
 var _case_text: RichTextLabel
 
+var _journal_panel: Control
+var _journal_text: RichTextLabel
+
 var _start_panel: Control
 var _start_seed_input: LineEdit
 var _start_api_key_input: LineEdit
@@ -67,6 +70,7 @@ func _ready() -> void:
 	_build_accuse_panel()
 	_build_accusation_result_panel()
 	_build_case_panel()
+	_build_journal_panel()
 	_build_start_panel()
 
 
@@ -101,7 +105,7 @@ func _build_always_on() -> void:
 	add_child(_hover_label)
 
 	_help_label = _make_label(Vector2(0, 0), 13)
-	_help_label.text = "WASD move | E interact | C case file | TAB inventory | F accuse | ESC close"
+	_help_label.text = "WASD move | E interact | C case | J journal | TAB inv | F accuse | ESC close"
 	_help_label.modulate = Color(0.85, 0.85, 0.85)
 	_help_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_help_label.position = Vector2(10, -28)
@@ -618,11 +622,75 @@ func close_case() -> void:
 
 
 # =============================================================================
+# Journal panel — every interview the player has done so far
+# =============================================================================
+
+func _build_journal_panel() -> void:
+	_journal_panel = _make_modal_root()
+	var v := _make_modal_box(_journal_panel, Vector2(900, 640))
+
+	var title := Label.new()
+	title.add_theme_font_size_override("font_size", 22)
+	title.text = "Interview Journal"
+	v.add_child(title)
+
+	_journal_text = _make_richtext()
+	_journal_text.scroll_active = true
+	_journal_text.custom_minimum_size = Vector2(0, 540)
+	v.add_child(_journal_text)
+
+	v.add_child(_make_hint("[J] or [ESC] to close. Scroll for older interviews."))
+
+	_journal_panel.visible = false
+	add_child(_journal_panel)
+
+
+func show_journal(log: Array) -> void:
+	hide_all_modals()
+	if log.is_empty():
+		_journal_text.text = "(You haven't interviewed anyone yet. Press E on a suspect to start.)"
+	else:
+		var lines: PackedStringArray = []
+		var first: bool = true
+		for entry in log:
+			var nm := String(entry.get("character_name", "?"))
+			var hist: Array = entry.get("history", [])
+			if not first:
+				lines.append("")
+				lines.append("")
+			first = false
+			lines.append("=== %s ===" % nm)
+			lines.append("")
+			if hist.is_empty():
+				lines.append("(no exchanges)")
+				continue
+			for turn in hist:
+				var role := String(turn.get("role", ""))
+				var content := String(turn.get("content", ""))
+				if role == "user":
+					lines.append("[You] %s" % content)
+				elif role == "assistant":
+					lines.append("[%s] %s" % [nm, content])
+				else:
+					lines.append(content)
+		_journal_text.text = "\n".join(lines)
+	_journal_panel.visible = true
+
+
+func is_journal_open() -> bool:
+	return _journal_panel != null and _journal_panel.visible
+
+
+func close_journal() -> void:
+	_journal_panel.visible = false
+
+
+# =============================================================================
 # Modal management
 # =============================================================================
 
 func is_any_modal_open() -> bool:
-	return is_result_open() or is_chat_open() or is_inventory_open() or is_accuse_open() or is_accusation_result_open() or is_case_open()
+	return is_result_open() or is_chat_open() or is_inventory_open() or is_accuse_open() or is_accusation_result_open() or is_case_open() or is_journal_open()
 
 
 func is_typing_modal_open() -> bool:
@@ -637,6 +705,7 @@ func hide_all_modals() -> void:
 	if _accuse_panel: _accuse_panel.visible = false
 	if _result_modal_panel: _result_modal_panel.visible = false
 	if _case_panel: _case_panel.visible = false
+	if _journal_panel: _journal_panel.visible = false
 	# Note: start panel is intentionally NOT hidden here. It's a pre-game
 	# screen, controlled separately by show_start_form / hide_start_form.
 

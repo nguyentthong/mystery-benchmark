@@ -156,6 +156,10 @@ func _on_message(msg: Dictionary) -> void:
 				String(msg.get("character_name", "")),
 				msg.get("history", []),
 			)
+		"interview_log":
+			_hud.show_journal(msg.get("log", []))
+			_pending_action = ""
+			_set_modal_active(true)
 		"error":
 			push_error("server error: " + str(msg.get("error", "")))
 			_hud.set_status("Server error: " + str(msg.get("error", "")))
@@ -263,13 +267,15 @@ func _input(event: InputEvent) -> void:
 			_close_open_modal()
 		return
 
-	# Non-typing modals (result panels, inventory, case file) can be dismissed
-	# with E/TAB/C/ESC.
+	# Non-typing modals (result panels, inventory, case file, journal)
+	# can be dismissed with E/TAB/C/J/ESC.
 	if _hud.is_any_modal_open():
 		var dismiss := key == KEY_ESCAPE or key == KEY_E
 		if key == KEY_TAB and _hud.is_inventory_open():
 			dismiss = true
 		if key == KEY_C and _hud.is_case_open():
+			dismiss = true
+		if key == KEY_J and _hud.is_journal_open():
 			dismiss = true
 		if dismiss:
 			_close_open_modal()
@@ -293,6 +299,9 @@ func _input(event: InputEvent) -> void:
 		KEY_C:
 			_request_case_file()
 			get_viewport().set_input_as_handled()
+		KEY_J:
+			_request_journal()
+			get_viewport().set_input_as_handled()
 
 
 func _close_open_modal() -> void:
@@ -304,6 +313,8 @@ func _close_open_modal() -> void:
 		_hud.close_inventory()
 	elif _hud.is_case_open():
 		_hud.close_case()
+	elif _hud.is_journal_open():
+		_hud.close_journal()
 	elif _hud.is_result_open():
 		_hud.close_result()
 	elif _hud.is_accusation_result_open():
@@ -366,6 +377,11 @@ func _request_inventory() -> void:
 func _request_case_file() -> void:
 	_pending_action = "case_file"
 	_ws.send_json({"type": "case_file", "request_id": _next_rid("case")})
+
+
+func _request_journal() -> void:
+	_pending_action = "journal"
+	_ws.send_json({"type": "interview_log", "request_id": _next_rid("jour")})
 
 
 func _open_accuse() -> void:

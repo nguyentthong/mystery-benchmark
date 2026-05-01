@@ -623,6 +623,38 @@ class GodotServer:
             elif msg_type == "case_file":
                 await ws.send(json.dumps(self._case_file_payload(request_id)))
 
+            elif msg_type == "interview_log":
+                # All recorded interviews across every character the player
+                # has spoken to so far. Used by the journal panel (key J).
+                log: list[dict[str, Any]] = []
+                for cid, history in self.env._interview_histories.items():
+                    char = self.env.state.characters.get(cid)
+                    if not char or not history:
+                        continue
+                    log.append(
+                        {
+                            "character_id": cid,
+                            "character_name": char.full_name,
+                            "history": [
+                                {
+                                    "role": str(t.get("role", "")),
+                                    "content": str(t.get("content", "")),
+                                }
+                                for t in history
+                            ],
+                        }
+                    )
+                log.sort(key=lambda e: e["character_name"])
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "interview_log",
+                            "request_id": request_id,
+                            "log": log,
+                        }
+                    )
+                )
+
             elif msg_type == "talk_history":
                 char_name = str(msg.get("character_name", ""))
                 char = next(
