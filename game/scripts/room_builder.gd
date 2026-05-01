@@ -687,19 +687,41 @@ func _spawn_character(
 	var seed_int := int(_string_hash(display_name))
 	var skin_color := _skin_palette(seed_int)
 	var hair_color := _hair_palette(seed_int >> 2)
-	# Roughly one in three alive non-victim characters sits in a chair
-	# instead of standing. Adds room ambience and breaks up the row of
-	# stiff figures.
-	var is_seated: bool = alive and role != "victim" and (abs(seed_int) % 3 == 0)
+	# Activity is the hash bucket that controls pose + accessory. Six buckets
+	# cover sitting / sitting-reading / standing-reading / standing-idle /
+	# sweeping / listening-to-radio. Suspects and innocents share the same
+	# bucket distribution -- the user must read role from the case file.
+	var activity: int = abs(seed_int) % 6 if alive and role != "victim" else 0
 
-	# Use the role colour for the shirt so the player can quickly tell
-	# suspect-from-innocent at a glance, without making the whole body
-	# flat-coloured. Pants stay dark.
-	var shirt_color := color
+	# Shirt colour is picked from a neutral palette by name hash, NOT by
+	# role. Suspects, innocents and witnesses all draw from the same set
+	# so the user can't tell role from clothing — they must read the case
+	# file (key C) to learn who's a suspect.
+	var shirt_palette := [
+		Color(0.55, 0.45, 0.35),   # warm brown
+		Color(0.40, 0.40, 0.50),   # navy-grey
+		Color(0.55, 0.40, 0.40),   # muted red
+		Color(0.45, 0.50, 0.40),   # olive
+		Color(0.35, 0.40, 0.45),   # slate
+		Color(0.50, 0.45, 0.35),   # tan
+		Color(0.40, 0.35, 0.45),   # plum
+		Color(0.50, 0.50, 0.45),   # warm grey
+	]
+	var shirt_color: Color = shirt_palette[abs(seed_int >> 4) % shirt_palette.size()]
 	if not alive or role == "victim":
 		shirt_color = Color(0.42, 0.36, 0.30)  # neutral darker tone for the body
 		skin_color = skin_color.darkened(0.25)
 	var pants_color := Color(0.22, 0.20, 0.17)
+	# Bucket meaning:
+	#   0,1 -> seated, reading a book
+	#   2   -> seated, idle
+	#   3   -> standing, reading a book
+	#   4   -> standing, holding a broom (cleaning)
+	#   5   -> standing, listening to a small radio (placed near them)
+	var is_seated: bool = alive and role != "victim" and activity <= 2
+	var has_book: bool = alive and role != "victim" and (activity == 0 or activity == 1 or activity == 3)
+	var has_broom: bool = alive and role != "victim" and activity == 4
+	var has_radio: bool = alive and role != "victim" and activity == 5
 
 	# Dimensions in metres at SCALE=1; total figure ~2.15m -> SCALE 0.85
 	# yields ~1.83m, a believable human height.
@@ -737,6 +759,33 @@ func _spawn_character(
 	_add_block(rig, Vector3(0.0, leg_top + TORSO_H * 0.5, 0.0), Vector3(TORSO_W, TORSO_H, TORSO_D), shirt_color)
 	if is_seated:
 		_add_block(rig, Vector3(0.0, sit_y + 0.05, 0.18), Vector3(TORSO_W * 0.85, 0.10, 0.30), pants_color)
+
+	# Activity props — held or placed near the character.
+	if has_book:
+		# Open book held in front, at chest level. Slightly tilted up.
+		var book_y: float = leg_top + TORSO_H * 0.30
+		var book_z: float = TORSO_D * 0.5 + 0.10
+		_add_block(rig, Vector3(0.0, book_y, book_z), Vector3(0.36, 0.04, 0.26), Color(0.92, 0.88, 0.78))
+		_add_block(rig, Vector3(0.0, book_y + 0.025, book_z), Vector3(0.34, 0.005, 0.24), Color(0.20, 0.15, 0.12))
+		# Spine ridge in the middle
+		_add_block(rig, Vector3(0.0, book_y + 0.03, book_z), Vector3(0.02, 0.005, 0.24), Color(0.45, 0.20, 0.15))
+	if has_broom:
+		# Broom shaft held diagonally to the side.
+		var shaft_color := Color(0.55, 0.40, 0.20)
+		var bristle_color := Color(0.85, 0.65, 0.30)
+		_add_block(rig, Vector3(TORSO_W * 0.5 + 0.10, leg_top + 0.55, 0.05), Vector3(0.04, 1.30, 0.04), shaft_color)
+		_add_block(rig, Vector3(TORSO_W * 0.5 + 0.10, 0.10, 0.10), Vector3(0.18, 0.20, 0.10), bristle_color)
+	if has_radio:
+		# Small radio on the floor next to the character.
+		var radio_x: float = TORSO_W * 0.5 + 0.30
+		_add_block(rig, Vector3(radio_x, 0.18, 0.0), Vector3(0.30, 0.20, 0.18), Color(0.30, 0.20, 0.15))
+		# Speaker grille
+		_add_block(rig, Vector3(radio_x, 0.18, 0.10), Vector3(0.22, 0.12, 0.005), Color(0.15, 0.12, 0.10))
+		# Antenna
+		_add_block(rig, Vector3(radio_x + 0.12, 0.55, -0.06), Vector3(0.02, 0.55, 0.02), Color(0.65, 0.65, 0.70))
+		# Knobs
+		_add_block(rig, Vector3(radio_x - 0.10, 0.13, 0.10), Vector3(0.04, 0.04, 0.02), Color(0.85, 0.65, 0.20))
+		_add_block(rig, Vector3(radio_x + 0.10, 0.13, 0.10), Vector3(0.04, 0.04, 0.02), Color(0.85, 0.65, 0.20))
 
 	# Arms (sleeve = shirt color, hanging straight down from shoulders)
 	var arm_y_center: float = torso_top - ARM_H * 0.5
@@ -818,7 +867,15 @@ func _spawn_character(
 		# Edge case (shouldn't happen in current generator but be safe)
 		label_text = "[VICTIM] " + display_name
 
-	_attach_label(holder, label_text, label_height, color)
+	# Label colour is uniform white-ish for living characters so suspects
+	# and innocents look identical above-name. Only the dead body's label
+	# is red. The role lookup happens in the case file (key C), not here.
+	var label_tint: Color
+	if alive and role != "victim":
+		label_tint = Color(0.95, 0.95, 0.95)
+	else:
+		label_tint = color  # red for victim/body
+	_attach_label(holder, label_text, label_height, label_tint)
 	return holder
 
 
