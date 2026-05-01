@@ -66,6 +66,7 @@ func build_from(room: Dictionary, tile_m: float) -> void:
 
 	_add_floor(width, height, tile_m, tiles)
 	_add_walls(tiles, width, height, tile_m)
+	_add_decor(width, height, tile_m, room.get("doors", []))
 	_add_door_triggers(room.get("doors", []), tile_m)
 	_add_objects(room.get("objects", []), tile_m)
 	_add_characters(room.get("characters", []), tile_m)
@@ -259,10 +260,10 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 	var visual_height: float = size * 1.2
 	var col_size: float = size
 
-	if procedural != null:
-		body.add_child(procedural)
-		col_size = 0.6
-		visual_height = 1.0
+	if not procedural.is_empty():
+		body.add_child(procedural["node"] as Node3D)
+		visual_height = float(procedural["height"])
+		col_size = clampf(visual_height, 0.3, 1.2)
 	else:
 		var resolved := _resolve_asset_full("objects", label_text, "")
 		var glb := _try_instance_asset(String(resolved.get("path", "")))
@@ -300,13 +301,13 @@ func _spawn_prop_box(tx: int, ty: int, tile_m: float, color: Color, label_text: 
 	col.shape = shape
 	# When the visual sits on the floor (procedural / GLB), centre the
 	# collider above y=0; the cube fallback already shifted the body.
-	if procedural != null or body.transform.origin == Vector3.ZERO:
+	if not procedural.is_empty() or body.transform.origin == Vector3.ZERO:
 		col.transform.origin = Vector3(0.0, col_size * 0.5, 0.0)
 	body.add_child(col)
 	holder.add_child(body)
 
-	# Label clearly above the visual.
-	var label_y: float = max(visual_height + 0.4, 1.0)
+	# Label sits just above the visual (visual_height was set per-asset).
+	var label_y: float = visual_height + 0.30
 	_attach_label(holder, label_text, label_y, color)
 	return holder
 
@@ -495,34 +496,60 @@ func _spawn_character(
 	return holder
 
 
-func _try_build_procedural_object(entity_name: String) -> Node3D:
-	# Build distinctive shapes for items the Kenney furniture pack can't
-	# represent (most weapons, plus a few clue objects). Returns null if no
-	# match — caller falls through to Kenney GLB / cube fallback.
+func _try_build_procedural_object(entity_name: String) -> Dictionary:
+	# Returns {"node": Node3D, "height": float} for items that should use a
+	# procedural shape (no good Kenney equivalent or visual is too distinct
+	# to fake). Returns {} if no match — caller falls through to Kenney GLB.
 	var lower := entity_name.to_lower()
 	if "cleaver" in lower or "knife" in lower or "letter opener" in lower:
-		return _build_cleaver()
+		return {"node": _build_cleaver(), "height": 0.45}
 	if "shears" in lower:
-		return _build_shears()
+		return {"node": _build_shears(), "height": 0.70}
 	if "revolver" in lower or "pistol" in lower:
-		return _build_revolver()
+		return {"node": _build_revolver(), "height": 0.45}
 	if "candlestick" in lower:
-		return _build_candlestick()
+		return {"node": _build_candlestick(), "height": 1.35}
 	if "decanter" in lower:
-		return _build_decanter()
+		return {"node": _build_decanter(), "height": 0.75}
 	if "vial" in lower or "poison" in lower:
-		return _build_vial()
+		return {"node": _build_vial(), "height": 0.45}
 	if "rope" in lower:
-		return _build_rope()
+		return {"node": _build_rope(), "height": 0.45}
 	if "poker" in lower or ("iron" in lower and "fireplace" in lower):
-		return _build_poker()
+		return {"node": _build_poker(), "height": 1.20}
 	if "bookend" in lower:
-		return _build_bookend()
+		return {"node": _build_bookend(), "height": 0.70}
 	if "scarf" in lower:
-		return _build_scarf()
+		return {"node": _build_scarf(), "height": 0.15}
 	if "statuette" in lower:
-		return _build_statuette()
-	return null
+		return {"node": _build_statuette(), "height": 0.65}
+	if "fireplace" in lower or "mantel" in lower:
+		return {"node": _build_fireplace(), "height": 1.80}
+	if "curtain" in lower:
+		return {"node": _build_curtain(), "height": 2.40}
+	if "boots" in lower:
+		return {"node": _build_boots(), "height": 0.30}
+	if "umbrella" in lower:
+		return {"node": _build_umbrella(), "height": 1.00}
+	if "envelope" in lower or "letter" in lower or "ticket" in lower or "receipt" in lower or "fingerprint" in lower:
+		return {"node": _build_paper(), "height": 0.10}
+	if "diary" in lower:
+		return {"node": _build_book(), "height": 0.20}
+	if "watch" in lower:
+		return {"node": _build_watch(), "height": 0.20}
+	if "key" in lower:
+		return {"node": _build_keyring(), "height": 0.15}
+	if "spectacles" in lower:
+		return {"node": _build_spectacles(), "height": 0.15}
+	if "glove" in lower:
+		return {"node": _build_glove(), "height": 0.15}
+	if "cigar" in lower:
+		return {"node": _build_cigar(), "height": 0.15}
+	if "ink" in lower and ("bottle" in lower or "spilled" in lower):
+		return {"node": _build_inkbottle(), "height": 0.20}
+	if "chess" in lower:
+		return {"node": _build_chessboard(), "height": 0.30}
+	return {}
 
 
 func _build_cleaver() -> Node3D:
@@ -657,12 +684,192 @@ func _build_scarf() -> Node3D:
 func _build_statuette() -> Node3D:
 	var root := Node3D.new()
 	var bronze := Color(0.55, 0.35, 0.15)
-	# Pedestal
 	_add_block(root, Vector3(0.0, 0.05, 0.0), Vector3(0.20, 0.10, 0.20), bronze.darkened(0.2))
-	# Body
 	_add_block(root, Vector3(0.0, 0.30, 0.0), Vector3(0.10, 0.30, 0.10), bronze)
-	# Head
 	_add_block(root, Vector3(0.0, 0.52, 0.0), Vector3(0.10, 0.10, 0.10), bronze)
+	return root
+
+
+func _build_fireplace() -> Node3D:
+	var root := Node3D.new()
+	var stone := Color(0.55, 0.50, 0.45)
+	var dark := Color(0.18, 0.16, 0.15)
+	var fire := Color(1.0, 0.55, 0.15)
+	var ember := Color(0.85, 0.25, 0.10)
+	# Outer mantel surround (taller than wide)
+	_add_block(root, Vector3(-0.65, 0.70, 0.0), Vector3(0.16, 1.40, 0.40), stone)
+	_add_block(root, Vector3( 0.65, 0.70, 0.0), Vector3(0.16, 1.40, 0.40), stone)
+	# Top mantel slab
+	_add_block(root, Vector3(0.0, 1.45, 0.0), Vector3(1.60, 0.18, 0.45), stone)
+	# Inner firebox (dark)
+	_add_block(root, Vector3(0.0, 0.65, -0.05), Vector3(1.10, 1.20, 0.30), dark)
+	# Logs and flame
+	_add_block(root, Vector3(-0.20, 0.18, 0.0), Vector3(0.50, 0.10, 0.10), Color(0.30, 0.18, 0.10))
+	_add_block(root, Vector3( 0.20, 0.18, 0.0), Vector3(0.50, 0.10, 0.10), Color(0.25, 0.15, 0.08))
+	_add_block(root, Vector3(0.0, 0.35, 0.0), Vector3(0.50, 0.30, 0.20), fire)
+	_add_block(root, Vector3(0.0, 0.55, 0.0), Vector3(0.30, 0.20, 0.15), ember)
+	return root
+
+
+func _build_curtain() -> Node3D:
+	var root := Node3D.new()
+	var heavy := Color(0.40, 0.10, 0.15)
+	var rod := Color(0.35, 0.25, 0.10)
+	# Curtain rod
+	_add_block(root, Vector3(0.0, 2.30, 0.0), Vector3(1.40, 0.06, 0.06), rod)
+	# Two heavy panels with vertical pleats (slightly different shades)
+	for i in 7:
+		var x: float = -0.65 + i * 0.20
+		var c := heavy.darkened(0.05) if (i % 2 == 0) else heavy
+		_add_block(root, Vector3(x, 1.15, 0.0), Vector3(0.18, 2.20, 0.06), c)
+	return root
+
+
+func _build_boots() -> Node3D:
+	var root := Node3D.new()
+	var leather := Color(0.30, 0.20, 0.12)
+	var sole := Color(0.10, 0.08, 0.06)
+	# Two boots side by side
+	for offset in [Vector3(-0.10, 0, 0), Vector3(0.10, 0, 0)]:
+		_add_block(root, offset + Vector3(0.0, 0.03, 0.0), Vector3(0.10, 0.06, 0.22), sole)
+		_add_block(root, offset + Vector3(0.0, 0.13, 0.0), Vector3(0.10, 0.14, 0.18), leather)
+		_add_block(root, offset + Vector3(0.0, 0.13, -0.06), Vector3(0.10, 0.14, 0.06), leather.darkened(0.1))
+	return root
+
+
+func _build_paper() -> Node3D:
+	var root := Node3D.new()
+	# Crumpled sheet on the floor
+	_add_block(root, Vector3(0.0, 0.01, 0.0), Vector3(0.22, 0.02, 0.30), Color(0.92, 0.88, 0.78))
+	_add_block(root, Vector3(0.06, 0.04, 0.05), Vector3(0.10, 0.04, 0.10), Color(0.85, 0.80, 0.70))
+	return root
+
+
+func _build_book() -> Node3D:
+	var root := Node3D.new()
+	_add_block(root, Vector3(0.0, 0.05, 0.0), Vector3(0.22, 0.10, 0.16), Color(0.30, 0.15, 0.12))
+	_add_block(root, Vector3(0.0, 0.08, 0.0), Vector3(0.18, 0.04, 0.14), Color(0.92, 0.88, 0.78))
+	_add_block(root, Vector3(-0.08, 0.10, 0.0), Vector3(0.02, 0.10, 0.16), Color(0.75, 0.40, 0.20))
+	return root
+
+
+func _build_watch() -> Node3D:
+	var root := Node3D.new()
+	# Small disc with a chain
+	_add_block(root, Vector3(0.0, 0.05, 0.0), Vector3(0.10, 0.04, 0.10), Color(0.85, 0.65, 0.20))
+	# Inner face
+	_add_block(root, Vector3(0.0, 0.07, 0.0), Vector3(0.07, 0.02, 0.07), Color(0.95, 0.92, 0.88))
+	# Hands
+	_add_block(root, Vector3(0.0, 0.085, 0.0), Vector3(0.05, 0.005, 0.005), Color.BLACK)
+	_add_block(root, Vector3(0.0, 0.085, 0.01), Vector3(0.005, 0.005, 0.04), Color.BLACK)
+	# Chain (a couple links)
+	for i in 4:
+		_add_block(root, Vector3(0.07 + i * 0.02, 0.05, 0.0), Vector3(0.018, 0.018, 0.018), Color(0.85, 0.65, 0.20))
+	return root
+
+
+func _build_keyring() -> Node3D:
+	var root := Node3D.new()
+	var brass := Color(0.85, 0.65, 0.20)
+	# Ring base
+	for i in 6:
+		var ang: float = i * TAU / 6.0
+		_add_block(root, Vector3(cos(ang) * 0.06, 0.02, sin(ang) * 0.06), Vector3(0.04, 0.02, 0.04), brass)
+	# Two keys hanging
+	_add_block(root, Vector3(0.10, 0.04, 0.02), Vector3(0.02, 0.05, 0.07), brass)
+	_add_block(root, Vector3(0.10, 0.04, -0.02), Vector3(0.02, 0.05, 0.07), brass)
+	return root
+
+
+func _build_spectacles() -> Node3D:
+	var root := Node3D.new()
+	var frame := Color(0.30, 0.20, 0.10)
+	# Two lenses
+	_add_block(root, Vector3(-0.06, 0.05, 0.0), Vector3(0.08, 0.08, 0.01), frame)
+	_add_block(root, Vector3( 0.06, 0.05, 0.0), Vector3(0.08, 0.08, 0.01), frame)
+	# Bridge
+	_add_block(root, Vector3(0.0, 0.05, 0.0), Vector3(0.04, 0.02, 0.01), frame)
+	# Earpieces
+	_add_block(root, Vector3(-0.10, 0.05, 0.04), Vector3(0.02, 0.02, 0.08), frame)
+	_add_block(root, Vector3( 0.10, 0.05, 0.04), Vector3(0.02, 0.02, 0.08), frame)
+	return root
+
+
+func _build_glove() -> Node3D:
+	var root := Node3D.new()
+	var cloth := Color(0.10, 0.08, 0.07)
+	var blood := Color(0.55, 0.05, 0.05)
+	# Palm
+	_add_block(root, Vector3(0.0, 0.03, 0.0), Vector3(0.10, 0.04, 0.16), cloth)
+	# Fingers (four small)
+	for i in 4:
+		var x: float = -0.04 + i * 0.025
+		_add_block(root, Vector3(x, 0.04, 0.10), Vector3(0.02, 0.04, 0.06), cloth)
+	# Bloodstain on top
+	_add_block(root, Vector3(0.0, 0.06, 0.04), Vector3(0.06, 0.005, 0.05), blood)
+	return root
+
+
+func _build_cigar() -> Node3D:
+	var root := Node3D.new()
+	var ash_tray := Color(0.20, 0.20, 0.22)
+	var cigar := Color(0.45, 0.30, 0.18)
+	var ash := Color(0.60, 0.55, 0.50)
+	# Ashtray dish
+	_add_block(root, Vector3(0.0, 0.02, 0.0), Vector3(0.20, 0.04, 0.20), ash_tray)
+	# Stub
+	_add_block(root, Vector3(0.04, 0.05, 0.0), Vector3(0.10, 0.03, 0.03), cigar)
+	# Ash on the end
+	_add_block(root, Vector3(-0.02, 0.05, 0.0), Vector3(0.03, 0.02, 0.03), ash)
+	return root
+
+
+func _build_inkbottle() -> Node3D:
+	var root := Node3D.new()
+	var glass := Color(0.20, 0.18, 0.30)
+	var ink := Color(0.05, 0.05, 0.20)
+	# Bottle
+	_add_block(root, Vector3(0.0, 0.06, 0.0), Vector3(0.10, 0.12, 0.10), glass)
+	# Spilled puddle
+	_add_block(root, Vector3(0.20, 0.005, 0.05), Vector3(0.30, 0.005, 0.20), ink)
+	_add_block(root, Vector3(0.30, 0.006, -0.05), Vector3(0.18, 0.005, 0.10), ink)
+	return root
+
+
+func _build_chessboard() -> Node3D:
+	var root := Node3D.new()
+	var dark := Color(0.20, 0.15, 0.10)
+	var light := Color(0.85, 0.78, 0.65)
+	# Board base
+	_add_block(root, Vector3(0.0, 0.02, 0.0), Vector3(0.40, 0.04, 0.40), dark)
+	# A few alternating squares (suggest chequerboard)
+	for i in 4:
+		for j in 4:
+			if (i + j) % 2 == 0:
+				_add_block(
+					root,
+					Vector3(-0.15 + i * 0.10, 0.04, -0.15 + j * 0.10),
+					Vector3(0.09, 0.005, 0.09),
+					light,
+				)
+	# A piece or two
+	_add_block(root, Vector3(-0.10, 0.10, -0.10), Vector3(0.05, 0.10, 0.05), light)
+	_add_block(root, Vector3( 0.10, 0.10,  0.10), Vector3(0.05, 0.10, 0.05), dark)
+	return root
+
+
+func _build_umbrella() -> Node3D:
+	var root := Node3D.new()
+	var fabric := Color(0.15, 0.20, 0.30)
+	var handle := Color(0.30, 0.20, 0.10)
+	# Shaft
+	_add_block(root, Vector3(0.0, 0.45, 0.0), Vector3(0.04, 0.90, 0.04), handle)
+	# Handle hook
+	_add_block(root, Vector3(0.06, 0.05, 0.0), Vector3(0.10, 0.04, 0.04), handle)
+	# Closed canopy (vertical fabric folds)
+	for i in 4:
+		var ang: float = i * TAU / 4.0
+		_add_block(root, Vector3(cos(ang) * 0.04, 0.65, sin(ang) * 0.04), Vector3(0.05, 0.50, 0.05), fabric)
 	return root
 
 
@@ -672,11 +879,12 @@ func _add_blood_pool(parent: Node3D) -> void:
 	# avoid z-fighting with the room floor mesh.
 	var blood_color := Color(0.55, 0.05, 0.05)
 	var blood_dark := Color(0.35, 0.03, 0.03)
+	# Sit just above the rug (y ≈ 0.014) so the splash isn't hidden under it.
 	var slabs := [
-		{"pos": Vector3(0.0, 0.005, 0.0),  "size": Vector3(2.4, 0.01, 1.4), "c": blood_color},
-		{"pos": Vector3(0.7, 0.006, 0.4),  "size": Vector3(1.0, 0.01, 0.6), "c": blood_color},
-		{"pos": Vector3(-0.6, 0.006, -0.5),"size": Vector3(0.9, 0.01, 0.7), "c": blood_color},
-		{"pos": Vector3(0.0, 0.007, 0.0),  "size": Vector3(1.2, 0.01, 0.7), "c": blood_dark},
+		{"pos": Vector3(0.0, 0.020, 0.0),  "size": Vector3(2.4, 0.01, 1.4), "c": blood_color},
+		{"pos": Vector3(0.7, 0.022, 0.4),  "size": Vector3(1.0, 0.01, 0.6), "c": blood_color},
+		{"pos": Vector3(-0.6, 0.022, -0.5),"size": Vector3(0.9, 0.01, 0.7), "c": blood_color},
+		{"pos": Vector3(0.0, 0.024, 0.0),  "size": Vector3(1.2, 0.01, 0.7), "c": blood_dark},
 	]
 	for s in slabs:
 		_add_block(parent, s["pos"], s["size"], s["c"])
@@ -909,6 +1117,232 @@ func _apply_tint(root: Node3D, tint: Color) -> void:
 # ---------------------------------------------------------------------------
 # Lighting
 # ---------------------------------------------------------------------------
+
+func _add_decor(width: int, height: int, tile_m: float, doors: Array) -> void:
+	# Pure-cosmetic dressing to make the room feel inhabited rather than a
+	# bare warehouse: ceiling, area rug, baseboards, paintings on the walls
+	# that aren't broken up by doors, and a hanging ceiling lamp. None of
+	# this is interactive or surfaced to the agent — the server's
+	# observation set is unchanged.
+	var size_x: float = width * tile_m
+	var size_z: float = height * tile_m
+
+	_add_ceiling(size_x, size_z)
+	_add_rug(size_x, size_z)
+	_add_baseboards(size_x, size_z)
+	_add_wall_paintings(size_x, size_z, doors)
+	_add_ceiling_lamp(size_x, size_z)
+
+
+func _add_ceiling(size_x: float, size_z: float) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.86, 0.83, 0.78)
+	mat.roughness = 0.95
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(size_x, size_z)
+	plane.material = mat
+	# Plane normal is +Y by default; flip so it faces down (visible from below).
+	plane.orientation = PlaneMesh.FACE_Y
+	var mi := MeshInstance3D.new()
+	mi.mesh = plane
+	mi.transform.origin = Vector3(size_x * 0.5, WALL_HEIGHT - 0.01, size_z * 0.5)
+	mi.rotation = Vector3(PI, 0.0, 0.0)
+	add_child(mi)
+
+
+func _add_rug(size_x: float, size_z: float) -> void:
+	# Outer rug border + inner pattern, slightly above the floor.
+	var border_mat := StandardMaterial3D.new()
+	border_mat.albedo_color = Color(0.30, 0.10, 0.10)
+	border_mat.roughness = 0.85
+	var inner_mat := StandardMaterial3D.new()
+	inner_mat.albedo_color = Color(0.60, 0.20, 0.18)
+	inner_mat.roughness = 0.85
+
+	var border := PlaneMesh.new()
+	border.size = Vector2(size_x * 0.55, size_z * 0.55)
+	border.material = border_mat
+	var b_mi := MeshInstance3D.new()
+	b_mi.mesh = border
+	b_mi.transform.origin = Vector3(size_x * 0.5, 0.012, size_z * 0.5)
+	add_child(b_mi)
+
+	var inner := PlaneMesh.new()
+	inner.size = Vector2(size_x * 0.45, size_z * 0.45)
+	inner.material = inner_mat
+	var i_mi := MeshInstance3D.new()
+	i_mi.mesh = inner
+	i_mi.transform.origin = Vector3(size_x * 0.5, 0.014, size_z * 0.5)
+	add_child(i_mi)
+
+
+func _add_baseboards(size_x: float, size_z: float) -> void:
+	# Thin dark trim along the inside base of the four perimeter walls.
+	var trim_mat := StandardMaterial3D.new()
+	trim_mat.albedo_color = Color(0.32, 0.25, 0.20)
+	trim_mat.roughness = 0.7
+
+	var bh: float = 0.18
+	var bd: float = 0.04
+	# Wall blocks occupy a 1 m thick perimeter. Trim sits flush against the
+	# inner wall face (z=1 for north, z=size_z-1 for south, etc.).
+	# North + South run along X
+	for z in [1.0 + bd * 0.5, size_z - 1.0 - bd * 0.5]:
+		var b := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(size_x - 2.0, bh, bd)
+		box.material = trim_mat
+		b.mesh = box
+		b.transform.origin = Vector3(size_x * 0.5, bh * 0.5, z)
+		add_child(b)
+	# East + West run along Z
+	for x in [1.0 + bd * 0.5, size_x - 1.0 - bd * 0.5]:
+		var b := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(bd, bh, size_z - 2.0)
+		box.material = trim_mat
+		b.mesh = box
+		b.transform.origin = Vector3(x, bh * 0.5, size_z * 0.5)
+		add_child(b)
+
+
+func _add_wall_paintings(size_x: float, size_z: float, doors: Array) -> void:
+	# Drop a framed painting on each wall that has no door, eyeballed at
+	# realistic eye height. Three different scenes (palette only, no real
+	# image) so each wall looks different.
+	var walls_with_doors: Array = []
+	for d in doors:
+		walls_with_doors.append(String(d.get("wall", "")))
+
+	var palettes := [
+		[Color(0.18, 0.28, 0.45), Color(0.55, 0.45, 0.30), Color(0.85, 0.78, 0.55)],
+		[Color(0.25, 0.40, 0.20), Color(0.65, 0.55, 0.35), Color(0.30, 0.20, 0.10)],
+		[Color(0.45, 0.20, 0.15), Color(0.85, 0.70, 0.45), Color(0.25, 0.18, 0.12)],
+		[Color(0.30, 0.30, 0.40), Color(0.85, 0.85, 0.85), Color(0.55, 0.40, 0.30)],
+	]
+	var palette_idx := 0
+	var center_x: float = size_x * 0.5
+	var center_z: float = size_z * 0.5
+	var painting_y: float = WALL_HEIGHT * 0.55
+
+	# Wall blocks span 1 metre out from each edge. Inner faces are at:
+	#   north: z = 1.0 + small offset (poke into the room)
+	#   south: z = size_z - 1.0 - small offset
+	#   east:  x = size_x - 1.0 - small offset
+	#   west:  x = 1.0 + small offset
+	var poke: float = 0.05
+	var walls := [
+		{"name": "north", "pos": Vector3(center_x, painting_y, 1.0 + poke), "vertical": false},
+		{"name": "south", "pos": Vector3(center_x, painting_y, size_z - 1.0 - poke), "vertical": false},
+		{"name": "east",  "pos": Vector3(size_x - 1.0 - poke, painting_y, center_z), "vertical": true},
+		{"name": "west",  "pos": Vector3(1.0 + poke, painting_y, center_z), "vertical": true},
+	]
+	for w in walls:
+		if String(w["name"]) in walls_with_doors:
+			continue
+		_paint_one_painting(w["pos"] as Vector3, bool(w["vertical"]), palettes[palette_idx % palettes.size()])
+		palette_idx += 1
+
+
+func _paint_one_painting(pos: Vector3, vertical: bool, palette: Array) -> void:
+	var holder := Node3D.new()
+	holder.transform.origin = pos
+	add_child(holder)
+	if vertical:
+		holder.rotation = Vector3(0.0, deg_to_rad(90.0), 0.0)
+
+	var frame_mat := StandardMaterial3D.new()
+	frame_mat.albedo_color = Color(0.40, 0.30, 0.20)
+	frame_mat.roughness = 0.6
+	var canvas_w: float = 1.10
+	var canvas_h: float = 0.80
+	var depth: float = 0.06
+
+	# Frame
+	var frame := MeshInstance3D.new()
+	var frame_box := BoxMesh.new()
+	frame_box.size = Vector3(canvas_w, canvas_h, depth)
+	frame_box.material = frame_mat
+	frame.mesh = frame_box
+	frame.transform.origin = Vector3(0.0, 0.0, 0.0)
+	holder.add_child(frame)
+
+	# A few coloured rectangles inside the frame, suggesting a painting.
+	var inner_w := canvas_w - 0.12
+	var inner_h := canvas_h - 0.12
+	var bands := palette.size()
+	for i in bands:
+		var c: Color = palette[i]
+		var band := MeshInstance3D.new()
+		var bbox := BoxMesh.new()
+		var band_h: float = inner_h / float(bands)
+		bbox.size = Vector3(inner_w, band_h, 0.005)
+		var band_mat := StandardMaterial3D.new()
+		band_mat.albedo_color = c
+		bbox.material = band_mat
+		band.mesh = bbox
+		band.transform.origin = Vector3(
+			0.0,
+			-inner_h * 0.5 + band_h * 0.5 + i * band_h,
+			-depth * 0.5 - 0.001,
+		)
+		holder.add_child(band)
+
+
+func _add_ceiling_lamp(size_x: float, size_z: float) -> void:
+	var holder := Node3D.new()
+	holder.transform.origin = Vector3(size_x * 0.5, WALL_HEIGHT - 0.02, size_z * 0.5)
+	add_child(holder)
+
+	var rod_mat := StandardMaterial3D.new()
+	rod_mat.albedo_color = Color(0.20, 0.20, 0.22)
+
+	var brass_mat := StandardMaterial3D.new()
+	brass_mat.albedo_color = Color(0.85, 0.65, 0.20)
+	brass_mat.metallic = 0.6
+	brass_mat.roughness = 0.4
+
+	var glow_mat := StandardMaterial3D.new()
+	glow_mat.albedo_color = Color(1.0, 0.92, 0.70)
+	glow_mat.emission_enabled = true
+	glow_mat.emission = Color(1.0, 0.92, 0.70)
+	glow_mat.emission_energy_multiplier = 1.5
+
+	# Hanging rod
+	var rod := MeshInstance3D.new()
+	var rod_box := BoxMesh.new()
+	rod_box.size = Vector3(0.04, 0.40, 0.04)
+	rod_box.material = rod_mat
+	rod.mesh = rod_box
+	rod.transform.origin = Vector3(0.0, -0.20, 0.0)
+	holder.add_child(rod)
+
+	# Brass shade
+	var shade := MeshInstance3D.new()
+	var shade_box := BoxMesh.new()
+	shade_box.size = Vector3(0.45, 0.10, 0.45)
+	shade_box.material = brass_mat
+	shade.mesh = shade_box
+	shade.transform.origin = Vector3(0.0, -0.45, 0.0)
+	holder.add_child(shade)
+
+	# Glowing bulb under the shade
+	var bulb := MeshInstance3D.new()
+	var bulb_box := BoxMesh.new()
+	bulb_box.size = Vector3(0.20, 0.06, 0.20)
+	bulb_box.material = glow_mat
+	bulb.mesh = bulb_box
+	bulb.transform.origin = Vector3(0.0, -0.55, 0.0)
+	holder.add_child(bulb)
+
+	# Local point light for atmosphere.
+	var omni := OmniLight3D.new()
+	omni.light_energy = 1.2
+	omni.omni_range = max(size_x, size_z)
+	omni.transform.origin = Vector3(0.0, -0.7, 0.0)
+	omni.light_color = Color(1.0, 0.92, 0.78)
+	holder.add_child(omni)
+
 
 func _add_lighting(width: int, height: int, tile_m: float) -> void:
 	var light := DirectionalLight3D.new()
