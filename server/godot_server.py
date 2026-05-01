@@ -47,13 +47,14 @@ from typing import Any
 import websockets
 
 from mystery_world import COMPLEXITY_PRESETS, ComplexityLevel
+from mystery_world.entities import CharacterRole
 from mystery_world.generator import generate_mystery
 from mystery_world.renderer.layout import (
     Tile,
     build_room_layout,
     compute_door_pairings,
 )
-from mystery_world.world import MysteryEnvironment
+from mystery_world.world import AgentAction, MysteryEnvironment
 
 
 logger = logging.getLogger("godot_server")
@@ -74,7 +75,39 @@ def _wall_for(tile_x: int, tile_y: int, w: int, h: int) -> str:
     return "interior"
 
 
-def serialize_room(env: MysteryEnvironment, location_id: str) -> dict[str, Any]:
+def _character_role(char: Any) -> str:
+    if CharacterRole.VICTIM in char.roles:
+        return "victim"
+    if CharacterRole.SUSPECT in char.roles:
+        return "suspect"
+    if CharacterRole.WITNESS in char.roles:
+        return "witness"
+    return "innocent"
+
+
+def _object_kind(obj: Any) -> str:
+    if obj.is_murder_weapon:
+        return "murder_weapon"
+    if obj.is_weapon:
+        return "weapon"
+    return "object"
+
+
+def serialize_room(
+    env: MysteryEnvironment,
+    location_id: str,
+    from_location_id: str | None = None,
+) -> dict[str, Any]:
+    """Serialize the spawn-room layout for the Godot client.
+
+    All objects and characters in the location are included, regardless of
+    evidence state or alive/dead status (CLAUDE.md rule 5: always-visible).
+    Visual styling is the renderer's job.
+
+    If `from_location_id` is given and the layout has a corresponding entry
+    in `spawn_from`, the player spawns at that door cell. Otherwise the
+    room's default spawn (center) is used.
+    """
     state = env.state
     location = state.locations[location_id]
     pairings = compute_door_pairings(state)
@@ -98,7 +131,42 @@ def serialize_room(env: MysteryEnvironment, location_id: str) -> dict[str, Any]:
             }
         )
 
-    spawn_x, spawn_y = layout.default_spawn
+    objects = []
+    for oid, (ox, oy) in sorted(layout.objects.items()):
+        obj = state.objects.get(oid)
+        if obj is None:
+            continue
+        objects.append(
+            {
+                "id": oid,
+                "name": obj.name,
+                "x": ox,
+                "y": oy,
+                "kind": _object_kind(obj),
+            }
+        )
+
+    characters = []
+    for cid, (cx, cy) in sorted(layout.characters.items()):
+        char = state.characters.get(cid)
+        if char is None:
+            continue
+        characters.append(
+            {
+                "id": cid,
+                "name": char.full_name,
+                "x": cx,
+                "y": cy,
+                "role": _character_role(char),
+                "alive": bool(char.is_alive),
+            }
+        )
+
+    if from_location_id and from_location_id in layout.spawn_from:
+        spawn_x, spawn_y = layout.spawn_from[from_location_id]
+    else:
+        spawn_x, spawn_y = layout.default_spawn
+
     return {
         "room_id": layout.location_id,
         "name": location.name,
@@ -107,6 +175,8 @@ def serialize_room(env: MysteryEnvironment, location_id: str) -> dict[str, Any]:
         "height": layout.height,
         "tiles": tiles,
         "doors": doors,
+        "objects": objects,
+        "characters": characters,
         "spawn": {
             "x": float(spawn_x) + 0.5,
             "y": float(spawn_y) + 0.5,
@@ -170,6 +240,55 @@ class GodotServer:
                     )
                 )
                 return
+            payload = {"type": "room", "request_id": request_id, **room}
+            await ws.send(json.dumps(payload))
+            return
+
+        if msg_type == "move_to_room":
+            target = str(msg.get("target_location_id", ""))
+            if not target:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "request_id": request_id,
+                            "error": "move_to_room requires target_location_id",
+                        }
+                    )
+                )
+                return
+            prev = self.env.agent_location_id
+            result = self.env.step(AgentAction.MOVE, target_location=target)
+            if not result.success:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "request_id": request_id,
+                            "error": result.observation,
+                        }
+                    )
+                )
+                return
+            try:
+                room = serialize_room(
+                    self.env,
+                    self.env.agent_location_id,
+                    from_location_id=prev,
+                )
+            except Exception as exc:
+                logger.exception("serialize_room (post-move) failed")
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "request_id": request_id,
+                            "error": str(exc),
+                        }
+                    )
+                )
+                return
+            logger.info("agent moved %s -> %s", prev, self.env.agent_location_id)
             payload = {"type": "room", "request_id": request_id, **room}
             await ws.send(json.dumps(payload))
             return
