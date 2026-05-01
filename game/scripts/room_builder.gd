@@ -221,6 +221,9 @@ func _on_door_body_entered(body: Node, leads_to: String) -> void:
 # ---------------------------------------------------------------------------
 
 const WALL_MOUNT_PATTERNS := ["mirror", "curtain", "window", "painting", "frame", "ledge"]
+# Free-standing items that belong against a wall but on the floor (radiator,
+# bookcase). Same routing as wall-mounted but with a floor-level slot.
+const WALL_ADJACENT_PATTERNS := ["radiator", "bookcase", "shelf of books"]
 
 
 func _is_wall_mounted(entity_name: String) -> bool:
@@ -231,14 +234,28 @@ func _is_wall_mounted(entity_name: String) -> bool:
 	return false
 
 
+func _is_wall_adjacent(entity_name: String) -> bool:
+	var lower := entity_name.to_lower()
+	for p in WALL_ADJACENT_PATTERNS:
+		if p in lower:
+			return true
+	return false
+
+
 func _add_objects(objects: Array, tile_m: float, width: int, height: int, doors: Array) -> void:
 	# Split: anything wall-mountable (mirror, curtain, painting, window
 	# ledge) gets stuck on a real wall instead of standing on the floor.
+	# Wall-adjacent items (radiator, bookcase) sit against a wall on the
+	# floor, facing into the room. Everything else is centred on its tile.
 	var wall_objects: Array = []
+	var wall_adjacent_objects: Array = []
 	var floor_objects: Array = []
 	for o in objects:
-		if _is_wall_mounted(String(o.get("name", ""))):
+		var nm := String(o.get("name", ""))
+		if _is_wall_mounted(nm):
 			wall_objects.append(o)
+		elif _is_wall_adjacent(nm):
+			wall_adjacent_objects.append(o)
 		else:
 			floor_objects.append(o)
 
@@ -259,8 +276,28 @@ func _add_objects(objects: Array, tile_m: float, width: int, height: int, doors:
 		holder.set_meta("entity_id", String(o.get("id", "")))
 		holder.set_meta("entity_subkind", kind)
 
-	# Wall-mounted props
-	var slots := _build_wall_slots(width, height, tile_m, doors, wall_objects.size())
+	# Wall-adjacent floor items first (they need wall slots too, but at floor level)
+	var n_floor_wall: int = wall_adjacent_objects.size()
+	var n_mid_wall: int = wall_objects.size()
+	var combined_slots := _build_wall_slots(width, height, tile_m, doors, n_floor_wall + n_mid_wall)
+	for i in n_floor_wall:
+		var wo: Dictionary = wall_adjacent_objects[i]
+		if i >= combined_slots.size():
+			# fall back to floor placement
+			var nm: String = String(wo.get("name", "object"))
+			var fb := _spawn_prop_box(int(wo.get("x", 0)), int(wo.get("y", 0)), tile_m, OBJECT_COLOR, nm, 0.55)
+			fb.set_meta("entity_kind", "object")
+			fb.set_meta("entity_name", nm)
+			fb.set_meta("entity_id", String(wo.get("id", "")))
+			fb.set_meta("entity_subkind", String(wo.get("kind", "object")))
+			continue
+		var slot: Dictionary = combined_slots[i].duplicate()
+		# Convert mid-wall slot (y=1.4) to floor-adjacent slot (y=0)
+		var p: Vector3 = slot["pos"]
+		slot["pos"] = Vector3(p.x, 0.0, p.z)
+		_spawn_floor_wall_object(wo, slot)
+	# Drop the slots used by wall-adjacent so wall-mounted picks fresh ones
+	var slots: Array = combined_slots.slice(n_floor_wall)
 	for i in wall_objects.size():
 		var wo: Dictionary = wall_objects[i]
 		if i >= slots.size():
@@ -372,16 +409,71 @@ func _spawn_wall_object(o: Dictionary, slot: Dictionary) -> void:
 	body.add_child(col)
 	holder.add_child(body)
 
-	# Label drifts slightly out from the wall, in front of the visual.
+	# Label sits well in front of the wall and is NOT billboarded — billboard
+	# rotation can swing the label's plane through the wall geometry. Without
+	# billboard the label stays parallel to the wall, only readable when the
+	# player looks at the wall (which is when they care about the item).
 	var label := Label3D.new()
 	label.text = entity_name
 	label.font_size = LABEL_FONT_SIZE
 	label.pixel_size = LABEL_PIXEL_SIZE
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	label.alpha_cut = Label3D.ALPHA_CUT_OPAQUE_PREPASS
 	label.modulate = color.lerp(Color(1, 1, 1), 0.4)
 	label.outline_size = 8
 	label.outline_modulate = Color(0, 0, 0)
-	label.transform.origin = Vector3(0.0, 1.0, 0.20)
+	# Local +Z points into the room; offset 0.6m so the label clears the
+	# wall-mounted visual by a wide margin.
+	label.transform.origin = Vector3(0.0, 1.0, 0.60)
+	holder.add_child(label)
+
+
+func _spawn_floor_wall_object(o: Dictionary, slot: Dictionary) -> void:
+	# Like _spawn_wall_object but for free-standing items that sit on the
+	# floor against a wall (radiator, bookcase). Use the procedural builder
+	# we already have, oriented to face into the room.
+	var entity_name: String = String(o.get("name", "object"))
+	var holder := Node3D.new()
+	holder.transform.origin = slot["pos"]
+	holder.rotation.y = float(slot["rot_y"])
+	add_child(holder)
+
+	holder.set_meta("entity_kind", "object")
+	holder.set_meta("entity_name", entity_name)
+	holder.set_meta("entity_id", String(o.get("id", "")))
+	holder.set_meta("entity_subkind", String(o.get("kind", "object")))
+
+	var procedural := _try_build_procedural_object(entity_name)
+	var visual_height: float = 1.0
+	if not procedural.is_empty():
+		var visual: Node3D = procedural["node"] as Node3D
+		# Push slightly forward so the item sits flush against the wall but
+		# its bulk is in front of the wall surface, not buried in it.
+		visual.transform.origin = Vector3(0.0, 0.0, 0.20)
+		holder.add_child(visual)
+		visual_height = float(procedural["height"])
+
+	# Collision body
+	var body := StaticBody3D.new()
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(1.0, max(visual_height, 0.6), 0.4)
+	col.shape = shape
+	col.transform.origin = Vector3(0.0, max(visual_height, 0.6) * 0.5, 0.20)
+	body.add_child(col)
+	holder.add_child(body)
+
+	# Label sits above the item, perpendicular to the wall.
+	var label := Label3D.new()
+	label.text = entity_name
+	label.font_size = LABEL_FONT_SIZE
+	label.pixel_size = LABEL_PIXEL_SIZE
+	label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	label.alpha_cut = Label3D.ALPHA_CUT_OPAQUE_PREPASS
+	label.modulate = OBJECT_COLOR.lerp(Color(1, 1, 1), 0.4)
+	label.outline_size = 8
+	label.outline_modulate = Color(0, 0, 0)
+	label.transform.origin = Vector3(0.0, visual_height + 0.30, 0.50)
 	holder.add_child(label)
 
 
@@ -401,15 +493,27 @@ func _build_wall_curtain() -> Node3D:
 
 func _build_wall_mirror() -> Node3D:
 	var root := Node3D.new()
-	var frame := Color(0.65, 0.50, 0.20)
-	var glass := Color(0.75, 0.85, 0.92)
-	var glass_dark := Color(0.45, 0.55, 0.65)
-	# Ornate frame
-	_add_block(root, Vector3(0.0, 0.0, 0.0), Vector3(1.20, 1.60, 0.10), frame)
-	# Mirror surface
-	_add_block(root, Vector3(0.0, 0.0, 0.06), Vector3(1.00, 1.40, 0.02), glass)
-	# Subtle vertical reflection band for visual interest
-	_add_block(root, Vector3(-0.20, 0.0, 0.07), Vector3(0.10, 1.30, 0.005), glass_dark)
+	# Ornate frame in dark wood (not yellow brass)
+	var frame_color := Color(0.30, 0.20, 0.12)
+	# Mirror surface: silvery, very smooth so it reads as a mirror.
+	# (No real reflection without a Camera/Viewport setup, but a near-white
+	# metallic surface is the visual shorthand for "mirror".)
+	_add_block(root, Vector3(0.0, 0.0, 0.0), Vector3(1.20, 1.60, 0.10), frame_color)
+
+	var mirror_mat := StandardMaterial3D.new()
+	mirror_mat.albedo_color = Color(0.92, 0.94, 0.96)
+	mirror_mat.metallic = 0.9
+	mirror_mat.roughness = 0.05
+	var mirror_mesh := BoxMesh.new()
+	mirror_mesh.size = Vector3(1.00, 1.40, 0.02)
+	var mirror_mi := MeshInstance3D.new()
+	mirror_mi.mesh = mirror_mesh
+	mirror_mi.set_surface_override_material(0, mirror_mat)
+	mirror_mi.transform.origin = Vector3(0.0, 0.0, 0.06)
+	root.add_child(mirror_mi)
+
+	# Inner highlight strip for visual interest
+	_add_block(root, Vector3(-0.30, 0.0, 0.075), Vector3(0.04, 1.30, 0.005), Color(0.65, 0.75, 0.80))
 	return root
 
 
@@ -583,6 +687,10 @@ func _spawn_character(
 	var seed_int := int(_string_hash(display_name))
 	var skin_color := _skin_palette(seed_int)
 	var hair_color := _hair_palette(seed_int >> 2)
+	# Roughly one in three alive non-victim characters sits in a chair
+	# instead of standing. Adds room ambience and breaks up the row of
+	# stiff figures.
+	var is_seated: bool = alive and role != "victim" and (abs(seed_int) % 3 == 0)
 
 	# Use the role colour for the shirt so the player can quickly tell
 	# suspect-from-innocent at a glance, without making the whole body
@@ -609,17 +717,26 @@ func _spawn_character(
 
 	rig.scale = Vector3(SCALE, SCALE, SCALE)
 
-	# Heights relative to the feet (y=0 in rig-local space).
-	var leg_top: float = LEG_H
+	# Seated pose offsets.
+	var sit_y: float = 0.42  # chair-seat top, in rig-local metres
+	var leg_top: float
+	if is_seated:
+		_add_chair_in_rig(rig, sit_y, hair_color)
+		leg_top = sit_y  # torso starts at chair seat
+	else:
+		leg_top = LEG_H
+		# Vertical legs (only if standing).
+		_add_block(rig, Vector3(-LEG_W * 0.55, LEG_H * 0.5, 0.0), Vector3(LEG_W, LEG_H, LEG_D), pants_color)
+		_add_block(rig, Vector3( LEG_W * 0.55, LEG_H * 0.5, 0.0), Vector3(LEG_W, LEG_H, LEG_D), pants_color)
+
 	var torso_top: float = leg_top + TORSO_H
 	var head_top: float = torso_top + HEAD
 
-	# Legs
-	_add_block(rig, Vector3(-LEG_W * 0.55, LEG_H * 0.5, 0.0), Vector3(LEG_W, LEG_H, LEG_D), pants_color)
-	_add_block(rig, Vector3( LEG_W * 0.55, LEG_H * 0.5, 0.0), Vector3(LEG_W, LEG_H, LEG_D), pants_color)
-
-	# Torso (shirt)
+	# Torso (shirt). For seated, also add a "lap" block to suggest thighs
+	# resting on the chair seat — the legs are otherwise hidden by the chair.
 	_add_block(rig, Vector3(0.0, leg_top + TORSO_H * 0.5, 0.0), Vector3(TORSO_W, TORSO_H, TORSO_D), shirt_color)
+	if is_seated:
+		_add_block(rig, Vector3(0.0, sit_y + 0.05, 0.18), Vector3(TORSO_W * 0.85, 0.10, 0.30), pants_color)
 
 	# Arms (sleeve = shirt color, hanging straight down from shoulders)
 	var arm_y_center: float = torso_top - ARM_H * 0.5
@@ -748,24 +865,27 @@ func _try_build_procedural_object(entity_name: String) -> Dictionary:
 		return {"node": _build_radiator(), "height": 0.80}
 	if "shelf of books" in lower or "bookcase" in lower or "bookshelf" in lower:
 		return {"node": _build_bookcase(), "height": 1.85}
+	# Small items belong on a flat surface, not the floor. Each is wrapped
+	# with a procedural side table beneath it so the visual reads as
+	# "object on a side table" rather than "object floating".
 	if "envelope" in lower or "letter" in lower or "ticket" in lower or "receipt" in lower or "fingerprint" in lower:
-		return {"node": _build_paper(), "height": 0.10}
+		return {"node": _wrap_on_table(_build_paper()), "height": 0.95}
 	if "diary" in lower:
-		return {"node": _build_book(), "height": 0.20}
+		return {"node": _wrap_on_table(_build_book()), "height": 1.05}
 	if "watch" in lower:
-		return {"node": _build_watch(), "height": 0.20}
+		return {"node": _wrap_on_table(_build_watch()), "height": 1.00}
 	if "key" in lower:
-		return {"node": _build_keyring(), "height": 0.15}
+		return {"node": _wrap_on_table(_build_keyring()), "height": 0.95}
 	if "spectacles" in lower:
-		return {"node": _build_spectacles(), "height": 0.15}
+		return {"node": _wrap_on_table(_build_spectacles()), "height": 0.95}
 	if "glove" in lower:
-		return {"node": _build_glove(), "height": 0.15}
+		return {"node": _wrap_on_table(_build_glove()), "height": 0.95}
 	if "cigar" in lower:
-		return {"node": _build_cigar(), "height": 0.15}
+		return {"node": _wrap_on_table(_build_cigar()), "height": 0.95}
 	if "ink" in lower and ("bottle" in lower or "spilled" in lower):
-		return {"node": _build_inkbottle(), "height": 0.20}
+		return {"node": _wrap_on_table(_build_inkbottle()), "height": 1.00}
 	if "chess" in lower:
-		return {"node": _build_chessboard(), "height": 0.30}
+		return {"node": _wrap_on_table(_build_chessboard()), "height": 1.10}
 	return {}
 
 
@@ -951,6 +1071,43 @@ func _build_boots() -> Node3D:
 		_add_block(root, offset + Vector3(0.0, 0.03, 0.0), Vector3(0.10, 0.06, 0.22), sole)
 		_add_block(root, offset + Vector3(0.0, 0.13, 0.0), Vector3(0.10, 0.14, 0.18), leather)
 		_add_block(root, offset + Vector3(0.0, 0.13, -0.06), Vector3(0.10, 0.14, 0.06), leather.darkened(0.1))
+	return root
+
+
+func _wrap_on_table(item: Node3D) -> Node3D:
+	# Wrap a small object so it sits on top of a procedural side table
+	# instead of floating on the floor. The item is reparented; the table
+	# legs and surface come from this function.
+	var root := Node3D.new()
+	var leg_color := Color(0.32, 0.22, 0.14)
+	var top_color := Color(0.45, 0.30, 0.20)
+
+	var leg_h: float = 0.70
+	var top_size: float = 0.55
+	var top_thickness: float = 0.05
+	var leg_size: float = 0.05
+	var inset: float = top_size * 0.5 - leg_size * 0.5 - 0.02
+
+	for sx in [-1, 1]:
+		for sz in [-1, 1]:
+			_add_block(
+				root,
+				Vector3(sx * inset, leg_h * 0.5, sz * inset),
+				Vector3(leg_size, leg_h, leg_size),
+				leg_color,
+			)
+
+	# Tabletop
+	_add_block(
+		root,
+		Vector3(0.0, leg_h + top_thickness * 0.5, 0.0),
+		Vector3(top_size, top_thickness, top_size),
+		top_color,
+	)
+
+	# Place the item on top of the table.
+	item.transform.origin = Vector3(0.0, leg_h + top_thickness, 0.0)
+	root.add_child(item)
 	return root
 
 
@@ -1187,6 +1344,46 @@ func _add_blood_pool(parent: Node3D) -> void:
 	]
 	for s in slabs:
 		_add_block(parent, s["pos"], s["size"], s["c"])
+
+
+func _add_chair_in_rig(rig: Node3D, sit_y: float, accent: Color) -> void:
+	# Build a simple wooden chair attached to the rig so it rotates with the
+	# character (otherwise the backrest would point a fixed direction while
+	# the character swivels to track the player).
+	var wood := Color(0.30, 0.20, 0.12)
+	var seat_size: float = 0.55
+	var seat_thickness: float = 0.06
+	# Seat
+	_add_block(
+		rig,
+		Vector3(0.0, sit_y, 0.0),
+		Vector3(seat_size, seat_thickness, seat_size),
+		wood,
+	)
+	# Four legs from floor up to seat
+	var leg_inset: float = seat_size * 0.5 - 0.06
+	for sx in [-1, 1]:
+		for sz in [-1, 1]:
+			_add_block(
+				rig,
+				Vector3(sx * leg_inset, sit_y * 0.5, sz * leg_inset),
+				Vector3(0.05, sit_y, 0.05),
+				wood,
+			)
+	# Backrest behind the seat (rig-local +Z is forward, so backrest is at -Z).
+	_add_block(
+		rig,
+		Vector3(0.0, sit_y + 0.40, -seat_size * 0.5 + 0.04),
+		Vector3(seat_size, 0.80, 0.06),
+		wood.darkened(0.05),
+	)
+	# Two cushion-coloured stripes for visual interest (matches accent slightly)
+	_add_block(
+		rig,
+		Vector3(0.0, sit_y + 0.06, 0.0),
+		Vector3(seat_size * 0.85, 0.02, seat_size * 0.85),
+		accent.darkened(0.5),
+	)
 
 
 func _add_block(parent: Node3D, pos: Vector3, size: Vector3, color: Color) -> void:
