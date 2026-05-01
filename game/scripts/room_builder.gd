@@ -341,6 +341,13 @@ func _spawn_character(
 	alive: bool,
 	role: String,
 ) -> Node3D:
+	# Procedural Minecraft-style stacked-blocks character.
+	#
+	# Why not Kenney GLBs? Repeated attempts to render Kenney's mini-character
+	# meshes produced either solid white (when materials didn't load) or
+	# solid green (when the sibling .png override mapped wrong UVs).
+	# Building the figure from BoxMesh primitives gives full control: the
+	# colours we set are the colours that render. No import quirks.
 	var holder := Node3D.new()
 	holder.transform.origin = Vector3(
 		tx * tile_m + tile_m * 0.5,
@@ -349,70 +356,105 @@ func _spawn_character(
 	)
 	add_child(holder)
 
-	var resolved := _resolve_asset_full("characters", display_name, role)
-	var glb := _try_instance_asset(String(resolved.get("path", "")))
+	# Rig: holder -> rig (rotates 90° if dead) -> body parts.
+	# Label and collision live on the holder so they stay upright/correct
+	# regardless of the rig's orientation.
+	var rig := Node3D.new()
+	holder.add_child(rig)
+	if not alive:
+		rig.rotation = Vector3(0.0, 0.0, deg_to_rad(90.0))
 
-	var body := StaticBody3D.new()
+	# Per-character variation, deterministic from the display name so the
+	# same NPC always looks the same across reloads.
+	var seed_int := int(_string_hash(display_name))
+	var skin_color := _skin_palette(seed_int)
+	var hair_color := _hair_palette(seed_int >> 2)
 
-	var label_prefix := ""
-	var glb_path_present := glb != null
-	var s_for_label: float = float(resolved.get("scale", 1.0))
-	var label_height: float = max(2.1, s_for_label * 1.0 + 0.4)
+	# Use the role colour for the shirt so the player can quickly tell
+	# suspect-from-innocent at a glance, without making the whole body
+	# flat-coloured. Pants stay dark.
+	var shirt_color := color
+	if not alive or role == "victim":
+		shirt_color = Color(0.42, 0.36, 0.30)  # neutral darker tone for the body
+		skin_color = skin_color.darkened(0.25)
+	var pants_color := Color(0.22, 0.20, 0.17)
 
-	if alive:
-		# Kenney character models have origin at the FEET; place body at y=0.
-		# Capsule fallback is centered, so it gets y=0.85.
-		if glb_path_present:
-			body.transform.origin = Vector3(0.0, 0.0, 0.0)
-		else:
-			body.transform.origin = Vector3(0.0, 0.85, 0.0)
-	else:
-		# CLAUDE.md rule 14: bodies don't move. Lay flat by rotating 90 deg
-		# around Z. With a feet-origin GLB the model rotates around its feet
-		# (slightly off centre but readable as a fallen body).
-		if glb_path_present:
-			body.transform.origin = Vector3(0.0, 0.0, 0.0)
-		else:
-			body.transform.origin = Vector3(0.0, 0.35, 0.0)
-		body.rotation = Vector3(0.0, 0.0, deg_to_rad(90.0))
-		label_prefix = "[BODY] "
-		label_height = max(1.0, s_for_label * 0.5 + 0.4)
+	# Dimensions in metres, scaled later via SCALE.
+	var HEAD: float = 0.55
+	var TORSO_W: float = 0.70
+	var TORSO_H: float = 0.85
+	var TORSO_D: float = 0.40
+	var ARM_W: float = 0.20
+	var ARM_H: float = 0.95
+	var ARM_D: float = 0.20
+	var LEG_W: float = 0.28
+	var LEG_H: float = 0.75
+	var LEG_D: float = 0.28
+	var SCALE: float = 1.6
 
-	if glb != null:
-		var s: float = float(resolved.get("scale", 1.0))
-		if not is_equal_approx(s, 1.0):
-			glb.scale = Vector3(s, s, s)
-		# Characters: do NOT apply a tint or texture override. Kenney's
-		# embedded materials are designed for these specific UVs; forcing a
-		# different texture sampled the wrong way produces unpleasant solid
-		# greens. Role identity is conveyed by the floating colour-coded
-		# label, not by the body colour.
-		body.add_child(glb)
-	else:
-		# Capsule fallback for missing meshes — apply a neutral skin tone so
-		# fallback bodies don't look like role-coloured ghosts either.
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = Color(0.95, 0.78, 0.65)
-		mat.roughness = 0.75
-		var visual := MeshInstance3D.new()
-		var capsule := CapsuleMesh.new()
-		capsule.radius = 0.35
-		capsule.height = 1.7
-		capsule.material = mat
-		visual.mesh = capsule
-		body.add_child(visual)
+	rig.scale = Vector3(SCALE, SCALE, SCALE)
 
+	# Heights relative to the feet (y=0 in rig-local space).
+	var leg_top: float = LEG_H
+	var torso_top: float = leg_top + TORSO_H
+	var head_top: float = torso_top + HEAD
+
+	# Legs
+	_add_block(rig, Vector3(-LEG_W * 0.55, LEG_H * 0.5, 0.0), Vector3(LEG_W, LEG_H, LEG_D), pants_color)
+	_add_block(rig, Vector3( LEG_W * 0.55, LEG_H * 0.5, 0.0), Vector3(LEG_W, LEG_H, LEG_D), pants_color)
+
+	# Torso (shirt)
+	_add_block(rig, Vector3(0.0, leg_top + TORSO_H * 0.5, 0.0), Vector3(TORSO_W, TORSO_H, TORSO_D), shirt_color)
+
+	# Arms (sleeve = shirt color, hanging straight down from shoulders)
+	var arm_y_center: float = torso_top - ARM_H * 0.5
+	var shoulder_x: float = TORSO_W * 0.5 + ARM_W * 0.5
+	_add_block(rig, Vector3(-shoulder_x, arm_y_center, 0.0), Vector3(ARM_W, ARM_H, ARM_D), shirt_color)
+	_add_block(rig, Vector3( shoulder_x, arm_y_center, 0.0), Vector3(ARM_W, ARM_H, ARM_D), shirt_color)
+
+	# Head (skin)
+	_add_block(rig, Vector3(0.0, torso_top + HEAD * 0.5, 0.0), Vector3(HEAD, HEAD, HEAD), skin_color)
+
+	# Hair: a thin slab on top of the head
+	var hair_h: float = 0.10
+	_add_block(rig, Vector3(0.0, head_top + hair_h * 0.5, 0.0), Vector3(HEAD * 1.02, hair_h, HEAD * 1.02), hair_color)
+
+	# Face accents: simple eye dots so the character has a "front"
+	var eye_color := Color(0.10, 0.08, 0.07)
+	var eye_size := Vector3(0.07, 0.08, 0.05)
+	var eye_y: float = torso_top + HEAD * 0.62
+	var eye_z: float = TORSO_D * 0.5 + 0.06  # poke out the front (along +Z)
+	_add_block(rig, Vector3(-0.11, eye_y, eye_z), eye_size, eye_color)
+	_add_block(rig, Vector3( 0.11, eye_y, eye_z), eye_size, eye_color)
+
+	# Collision: a single capsule covering the whole figure.
+	var col_body := StaticBody3D.new()
 	var col := CollisionShape3D.new()
 	var shape := CapsuleShape3D.new()
-	shape.radius = 0.35
-	shape.height = 1.7
+	var total_height: float = head_top * SCALE  # approximate
+	shape.radius = max(TORSO_W, TORSO_D) * 0.5 * SCALE
+	shape.height = total_height
 	col.shape = shape
-	# When the alive GLB has its origin at the feet, lift the capsule collider
-	# up so it covers the standing body, not the floor below.
-	if alive and glb_path_present:
-		col.transform.origin = Vector3(0.0, 0.85, 0.0)
-	body.add_child(col)
-	holder.add_child(body)
+	if alive:
+		col.transform.origin = Vector3(0.0, total_height * 0.5, 0.0)
+	else:
+		# Body is rotated to lie flat; a small fixed-Y capsule covers it.
+		col.transform.origin = Vector3(0.0, shape.radius, 0.0)
+		col.rotation = Vector3(0.0, 0.0, deg_to_rad(90.0))
+	col_body.add_child(col)
+	holder.add_child(col_body)
+
+	# Pass the rig back via the function's return so the caller can attach
+	# metadata. The caller already sets meta on the holder; we don't need to.
+	# The label is added below by the original logic.
+	var label_prefix := ""
+	var label_height: float
+	if alive:
+		label_height = head_top * SCALE + 0.5
+	else:
+		label_prefix = "[BODY] "
+		# Body lies along X with height = TORSO_D * SCALE; label just above it.
+		label_height = TORSO_D * SCALE + 0.6
 
 	var label_text := label_prefix + display_name
 	if role == "victim" and alive:
@@ -421,6 +463,53 @@ func _spawn_character(
 
 	_attach_label(holder, label_text, label_height, color)
 	return holder
+
+
+func _add_block(parent: Node3D, pos: Vector3, size: Vector3, color: Color) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = 0.85
+	mat.metallic = 0.0
+	var box := BoxMesh.new()
+	box.size = size
+	var mi := MeshInstance3D.new()
+	mi.mesh = box
+	mi.transform.origin = pos
+	# Attach the material as the surface override so each block can vary its
+	# colour without sharing material state.
+	mi.set_surface_override_material(0, mat)
+	parent.add_child(mi)
+
+
+func _string_hash(s: String) -> int:
+	var h: int = 5381
+	for i in s.length():
+		h = ((h << 5) + h) + int(s.unicode_at(i))
+		h = h & 0x7FFFFFFF
+	return h
+
+
+func _skin_palette(idx: int) -> Color:
+	var palette := [
+		Color(1.00, 0.86, 0.74),  # pale
+		Color(0.95, 0.78, 0.65),  # light
+		Color(0.85, 0.65, 0.50),  # tan
+		Color(0.62, 0.45, 0.35),  # medium-dark
+		Color(0.40, 0.28, 0.22),  # dark
+	]
+	return palette[abs(idx) % palette.size()]
+
+
+func _hair_palette(idx: int) -> Color:
+	var palette := [
+		Color(0.10, 0.08, 0.07),  # black
+		Color(0.30, 0.20, 0.13),  # brown
+		Color(0.85, 0.70, 0.45),  # blond
+		Color(0.60, 0.30, 0.20),  # auburn
+		Color(0.55, 0.55, 0.55),  # grey
+		Color(0.20, 0.18, 0.16),  # dark brown
+	]
+	return palette[abs(idx) % palette.size()]
 
 
 func _attach_label(holder: Node3D, text: String, height: float, tint: Color) -> void:
