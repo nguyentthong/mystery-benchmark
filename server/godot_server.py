@@ -174,13 +174,17 @@ def serialize_room(
             }
         )
 
+    # Spawn the player in the *centre* of the room rather than next to the
+    # entry door. With chain-like room layouts every door is on the same
+    # axis, so spawning at a doorway puts the next door dead ahead — the
+    # player walks through one door and immediately sees another, never
+    # the room's interior. Centre-spawn fixes that: player lands amongst
+    # the rug / lamp / props / paintings, with the entry door behind them.
+    spawn_x, spawn_y = layout.default_spawn
     spawn_facing_deg = 0.0
     if from_location_id and from_location_id in layout.spawn_from:
-        spawn_x, spawn_y = layout.spawn_from[from_location_id]
-        # Face *away* from the wall containing the entry door so the rest
-        # of the room is in front of the player and the door is behind
-        # them. Without this the player can spawn staring at the very door
-        # they just walked through.
+        # Face *away* from the wall the entry door is on, so that door is
+        # behind the player and the rest of the room is in front of them.
         #
         # Godot mapping (rotation.y, with player looking down local -Z):
         #   0   -> world -Z = "north"
@@ -198,8 +202,6 @@ def serialize_room(
                 wall = _wall_for(dx, dy, layout.width, layout.height)
                 spawn_facing_deg = face_for_entry_wall.get(wall, 0.0)
                 break
-    else:
-        spawn_x, spawn_y = layout.default_spawn
 
     return {
         "room_id": layout.location_id,

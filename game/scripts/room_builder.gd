@@ -192,19 +192,20 @@ func _add_door_triggers(doors: Array, tile_m: float) -> void:
 		area.body_entered.connect(_on_door_body_entered.bind(leads_to))
 		add_child(area)
 
-		# Floating "Door -> Billiard Room" sign above the doorway so the
-		# player knows where each door leads. ASCII only (CLAUDE.md rule 9).
+		# Small destination tag right above the door arch so it's only
+		# readable when the player is fairly close. Keeps the label from
+		# dominating the view across the room. ASCII only (CLAUDE.md rule 9).
 		var label := Label3D.new()
-		label.text = "-> %s" % leads_to_name
-		label.font_size = LABEL_FONT_SIZE
-		label.pixel_size = LABEL_PIXEL_SIZE
+		label.text = leads_to_name
+		label.font_size = 24
+		label.pixel_size = 0.0025
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		label.modulate = Color(1.0, 0.85, 0.55)
-		label.outline_size = 8
+		label.modulate = Color(0.85, 0.75, 0.55, 0.85)
+		label.outline_size = 4
 		label.outline_modulate = Color(0, 0, 0)
 		label.transform.origin = Vector3(
 			dx * tile_m + tile_m * 0.5,
-			WALL_HEIGHT - 0.4,
+			WALL_HEIGHT * 0.85,
 			dy * tile_m + tile_m * 0.5,
 		)
 		add_child(label)
