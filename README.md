@@ -142,6 +142,41 @@ Commands in-game: `look`, `go <room>`, `examine <object>`, `search`, `talk <name
 
 The `hint` command runs the oracle agent against the current game state and prints its recommended next action.
 
+### 0b. Play the 3D Godot version
+
+The 3D client is a Godot 4 project that talks to a Python WebSocket server wrapping `MysteryEnvironment`. Run them in two terminals.
+
+Terminal A -- Python WebSocket server:
+
+```bash
+uv sync
+export OPENAI_API_KEY=sk-...                  # optional, enables LLM NPCs
+uv run python -m server.godot_server --seed 42
+# stdout: LISTEN ws://127.0.0.1:7777
+```
+
+Server flags:
+- `--seed N`              world seed (default 42)
+- `--port N`              port; `0` for an OS-assigned free port
+- `--host H`              default `127.0.0.1`
+- `--complexity LEVEL`    `TRIVIAL|EASY|MEDIUM|HARD|EXPERT` (default `EASY`)
+- `--npc-model MODEL`     OpenAI-compatible model id (default `gpt-4o-mini`)
+- `--log-level LEVEL`     default `INFO`
+
+Terminal B -- Godot client:
+
+```bash
+# Linux
+godot4 --path game
+
+# macOS
+/Applications/Godot.app/Contents/MacOS/Godot --path game
+```
+
+Or open `Godot.app`, **Import** -> `game/project.godot`, then F5.
+
+Controls: WASD move, mouse look, E interact, TAB inventory, F accuse, ESC release mouse.
+
 ### 1. Play the pre-generated benchmark examples
 
 Twenty curated cases (4 per difficulty level) are included in `examples/`. Each records the ground-truth answer and the oracle's full action sequence, making them ideal for benchmarking agents or comparing scores across players.
