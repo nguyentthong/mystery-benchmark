@@ -59,6 +59,212 @@ _NEUTRAL_HOST_OBJECTS = [
     "heavy curtain", "wicker basket", "footstool",
 ]
 
+
+# ---------------------------------------------------------------------------
+# Evidence-text paraphrase pools (Tier B).
+# Selected at generation time via rng.choice -- frozen into the world JSON.
+# Vary form, never truth conditions: every variant must use the same
+# placeholders and convey the same forensic claim.
+# ---------------------------------------------------------------------------
+
+_SUSPECT_WEAPON_NAMES = [
+    "traces on the {weapon}",
+    "grip marks on the {weapon}",
+    "fingerprint smudges on the {weapon}",
+    "handling traces on the {weapon}",
+    "skin oils on the {weapon}",
+    "contact residue on the {weapon}",
+    "imprint patterns on the {weapon}",
+    "smear marks on the {weapon}",
+    "use-traces on the {weapon}",
+    "grasp marks on the {weapon}",
+    "palm impression on the {weapon}",
+    "finger residue on the {weapon}",
+    "handler traces on the {weapon}",
+    "transfer marks on the {weapon}",
+    "skin residue on the {weapon}",
+    "dermal traces on the {weapon}",
+    "grip residue on the {weapon}",
+    "use marks on the {weapon}",
+    "epidermal smudge on the {weapon}",
+    "contact prints on the {weapon}",
+    "handprint trace on the {weapon}",
+    "secondary residue on the {weapon}",
+    "evidence of handling on the {weapon}",
+    "grip-print on the {weapon}",
+    "palm trace on the {weapon}",
+    "skin-trace deposit on the {weapon}",
+    "manipulation marks on the {weapon}",
+    "user-trace deposits on the {weapon}",
+    "finger-deposit pattern on the {weapon}",
+    "handle-residue on the {weapon}",
+]
+
+_SUSPECT_WEAPON_DESCS = [
+    "Grip marks from someone with {hands} found on the {weapon}.",
+    "Imprints consistent with {hands} are visible on the {weapon}.",
+    "The {weapon} bears clear contact patterns of {hands}.",
+    "Examination of the {weapon} shows handling marks from {hands}.",
+    "The grip area of the {weapon} carries prints from {hands}.",
+    "Smudges suggesting {hands} appear on the {weapon}.",
+    "The {weapon} shows hand-contact patterns matching {hands}.",
+    "Pattern of grip marks on the {weapon} indicates {hands}.",
+    "Forensic examination of the {weapon} reveals contact with {hands}.",
+    "Faint impressions on the {weapon} are characteristic of {hands}.",
+    "{hands} left distinctive traces on the {weapon}.",
+    "The {weapon} retains print patterns from {hands}.",
+    "Skin transfers visible on the {weapon} match {hands}.",
+    "On close inspection, the {weapon} bears handling consistent with {hands}.",
+    "The {weapon}'s surface shows ridge patterns from {hands}.",
+    "Marks left on the {weapon} are consistent with someone with {hands}.",
+    "Examination reveals the {weapon} was held by someone with {hands}.",
+    "Hand-traces on the {weapon} narrow the user to {hands}.",
+    "The {weapon} carries trace impressions of {hands}.",
+    "{hands} touched the {weapon} -- marks remain.",
+    "The {weapon}, on close look, shows contact from {hands}.",
+    "Dermal patterns on the {weapon} indicate {hands}.",
+    "Whoever last held the {weapon} had {hands}.",
+    "The grip of the {weapon} carries contact patterns from {hands}.",
+    "Subtle markings on the {weapon} are characteristic of {hands}.",
+    "The {weapon} shows clear traces of being held by {hands}.",
+    "Distinctive impressions of {hands} are present on the {weapon}.",
+    "Detailed inspection of the {weapon} reveals {hands}.",
+    "Ridge patterns on the {weapon} match someone with {hands}.",
+    "The user of the {weapon} appears to have had {hands}.",
+]
+
+_WEAPON_VICTIM_NAMES = [
+    "victim's blood on the {weapon}",
+    "blood traces on the {weapon}",
+    "tissue residue on the {weapon}",
+    "biological matter on the {weapon}",
+    "dried blood on the {weapon}",
+    "blood spatter on the {weapon}",
+    "victim DNA on the {weapon}",
+    "blood smears on the {weapon}",
+    "biological evidence on the {weapon}",
+    "blood film on the {weapon}",
+    "hemorrhagic traces on the {weapon}",
+    "blood deposit on the {weapon}",
+    "victim tissue on the {weapon}",
+    "matching blood traces on the {weapon}",
+    "blood-staining on the {weapon}",
+    "matter of biological origin on the {weapon}",
+    "stained surface of the {weapon}",
+    "discolouration consistent with blood on the {weapon}",
+    "darkened residue on the {weapon}",
+    "blood-and-tissue traces on the {weapon}",
+    "victim's blood traces on the {weapon}",
+    "wound transfer on the {weapon}",
+    "biological transfer on the {weapon}",
+    "smear of blood on the {weapon}",
+    "blood residue on the {weapon}",
+    "transfer evidence on the {weapon}",
+    "victim's biological trace on the {weapon}",
+    "vital-fluid traces on the {weapon}",
+    "haemic deposit on the {weapon}",
+    "blood-coated marking on the {weapon}",
+]
+
+_WEAPON_VICTIM_DESCS = [
+    "Blood and tissue matching the victim found on the {weapon}.",
+    "The {weapon} shows blood traces consistent with the victim.",
+    "Forensic match: blood on the {weapon} belongs to the victim.",
+    "Examination reveals victim's blood and tissue on the {weapon}.",
+    "Spatter and tissue on the {weapon} match the victim.",
+    "The {weapon} carries clear biological traces of the victim.",
+    "Blood-and-tissue residue on the {weapon} is the victim's.",
+    "Tests place the victim's blood on the {weapon}.",
+    "Dried blood on the {weapon} matches the victim.",
+    "The {weapon} bears blood and matter from the victim.",
+    "Lab confirms the residue on the {weapon} comes from the victim.",
+    "The {weapon} carries the victim's biological signature.",
+    "Microscopic examination shows victim's tissue on the {weapon}.",
+    "The {weapon}'s surface holds victim's blood traces.",
+    "Drying patterns on the {weapon} match the victim's blood.",
+    "Examined under light, the {weapon} reveals victim residue.",
+    "The {weapon} was used on the victim -- blood traces confirm.",
+    "Blood transfer on the {weapon} is from the victim.",
+    "Visible on the {weapon}: dried blood matching the victim.",
+    "The {weapon}'s edges show victim biological traces.",
+    "Blood from the victim is unmistakable on the {weapon}.",
+    "Forensic markers on the {weapon} place the victim there.",
+    "Dark stains on the {weapon} match the victim's blood type.",
+    "The {weapon} retains traces of the victim's blood and tissue.",
+    "Wound patterns leave biological transfer on the {weapon}.",
+    "Coronial findings: the {weapon} bears the victim's blood.",
+    "The {weapon} carries indelible traces of the victim.",
+    "Trace material on the {weapon} returns a victim match.",
+    "The victim bled onto the {weapon} -- traces persist.",
+    "Examined to confirm: victim's blood resides on the {weapon}.",
+]
+
+_SUSPECT_ROOM_NAMES = [
+    "shoe scuffs in the {room}",
+    "footprints in the {room}",
+    "boot tracks in the {room}",
+    "scuff marks in the {room}",
+    "tread patterns in the {room}",
+    "floor scrapes in the {room}",
+    "sole impressions in the {room}",
+    "step traces in the {room}",
+    "foot transfer in the {room}",
+    "shoeprint residue in the {room}",
+    "tread marks in the {room}",
+    "heel scuffs in the {room}",
+    "ground scuffs in the {room}",
+    "step scuffs in the {room}",
+    "movement traces in the {room}",
+    "trail of scuffs in the {room}",
+    "fresh scuffs in the {room}",
+    "scuffed marks across the {room}",
+    "boot-print residue in the {room}",
+    "stepping pattern in the {room}",
+    "trace of footwear in the {room}",
+    "passage marks in the {room}",
+    "footwear traces in the {room}",
+    "displaced dust in the {room}",
+    "fresh footprints in the {room}",
+    "step pattern in the {room}",
+    "telltale prints in the {room}",
+    "boot scrapes in the {room}",
+    "tread-deposit in the {room}",
+    "marks of recent passage in the {room}",
+]
+
+_SUSPECT_ROOM_DESCS = [
+    "Shoe prints from a {build} person found in the room.",
+    "The {room} carries footprints consistent with a {build} build.",
+    "Footprints in the {room} suggest someone of {build} build.",
+    "Tread patterns in the {room} match a {build} person.",
+    "Shoe impressions in the {room} are consistent with a {build} frame.",
+    "The depth of prints in the {room} indicates a {build} person.",
+    "Step pattern in the {room} fits someone {build}.",
+    "Sole prints in the {room} match a {build} build.",
+    "Dust patterns in the {room} show passage of someone {build}.",
+    "Clear prints in the {room} are characteristic of a {build} person.",
+    "The {room}'s floor holds prints of a {build} person.",
+    "Pressure patterns in prints across the {room} indicate {build}.",
+    "Recent traffic in the {room} matches someone of {build} build.",
+    "Footwear traces in the {room} are typical of a {build} person.",
+    "The {room} shows step impressions made by a {build} person.",
+    "Passage marks in the {room} suggest a {build} build.",
+    "Track depth in the {room} fits a {build} person.",
+    "A {build} person's gait is recorded in the {room}.",
+    "Tracks crossing the {room} match a {build} build.",
+    "The {room}'s surface preserves the steps of someone {build}.",
+    "Step weight in the {room} indicates a {build} person.",
+    "Faint prints in the {room} match a {build} suspect.",
+    "Sole compression in the {room} suggests a {build} build.",
+    "Tread evidence in the {room} narrows the suspect to a {build} build.",
+    "Clear footprint traces in the {room} are made by a {build} person.",
+    "The {room} carries gait evidence of a {build} person.",
+    "Prints in the {room} are consistent with a {build} frame.",
+    "The {room}'s floor reveals steps made by a {build} person.",
+    "Boot-prints in the {room} match a {build} person.",
+    "The {room} shows tread evidence from a {build} person.",
+]
+
 # ---------------------------------------------------------------------------
 # Surface label helper (Locard)
 # ---------------------------------------------------------------------------
@@ -146,7 +352,7 @@ def _generate_locations(
         tag = LocationTag.OUTDOOR if rng.random() < 0.3 else LocationTag.INDOOR
         locations[lid] = Location(
             id=lid, name=str(name), tag=tag,
-            description=f"A {tag.name.lower()} space known as the {name}.",
+            description=f"An {tag.name.lower()} space known as the {name}.",
             weather_exposed=(tag == LocationTag.OUTDOOR),
         )
         loc_ids.append(lid)
@@ -194,6 +400,9 @@ def _generate_characters(
     last_names = list(rng.choice(pool.last_names, size=min(total, len(pool.last_names)), replace=False))
     traits = list(rng.choice(pool.personality_traits, size=min(total, len(pool.personality_traits)), replace=False))
 
+    from mystery_world.entities import SPEECH_ARCHETYPES
+    archetype_keys = list(SPEECH_ARCHETYPES.keys())
+
     characters: dict[str, Character] = {}
     char_list: list[Character] = []
     for i in range(total):
@@ -203,12 +412,13 @@ def _generate_characters(
             first_name=str(first_names[i]),
             last_name=str(last_names[i]),
             personality=str(traits[i % len(traits)]),
+            speech_archetype=str(rng.choice(archetype_keys)),
             location_id=str(rng.choice(location_ids)),
         )
         characters[cid] = char
         char_list.append(char)
 
-    # Assign physical traits — initially unique per character
+    # Assign physical traits -- initially unique per character
     builds = list(rng.choice(pool.build_types, size=min(total, len(pool.build_types)), replace=False))
     hairs  = list(rng.choice(pool.hair_types,  size=min(total, len(pool.hair_types)),  replace=False))
     hands  = list(rng.choice(pool.hand_types,  size=min(total, len(pool.hand_types)),  replace=False))
@@ -353,11 +563,13 @@ def _generate_evidence_and_objects(
     mw_traits = _traits(mw_linked_id)
     mw_ev = Evidence(
         id=_uid("ev", rng),
-        name=f"traces on the {murder_weapon_name}",
+        name=str(rng.choice(_SUSPECT_WEAPON_NAMES)).format(weapon=murder_weapon_name),
         evidence_type=EvidenceType.PHYSICAL,
         location_id=murder_location_id,
         linked_character_id=mw_linked_id,
-        description=f"Grip marks from someone with {mw_traits.hands} found on the {murder_weapon_name}.",
+        description=str(rng.choice(_SUSPECT_WEAPON_DESCS)).format(
+            hands=mw_traits.hands, weapon=murder_weapon_name,
+        ),
         discovery_difficulty=_sample_difficulty(),
         weather_sensitive=bool(murder_loc and murder_loc.weather_exposed),
         relevance=EdgeRelevance(
@@ -373,11 +585,11 @@ def _generate_evidence_and_objects(
     # --- WEAPON_VICTIM evidence (victim blood on weapon) ---
     wv_ev = Evidence(
         id=_uid("ev", rng),
-        name=f"victim's blood on the {murder_weapon_name}",
+        name=str(rng.choice(_WEAPON_VICTIM_NAMES)).format(weapon=murder_weapon_name),
         evidence_type=EvidenceType.PHYSICAL,
         location_id=weapon_loc_id,
         linked_character_id=victim_id,
-        description=f"Blood and tissue matching the victim found on the {murder_weapon_name}.",
+        description=str(rng.choice(_WEAPON_VICTIM_DESCS)).format(weapon=murder_weapon_name),
         discovery_difficulty=_sample_difficulty(),
         relevance=EdgeRelevance(
             edge_type=EdgeType.WEAPON_VICTIM,
@@ -393,11 +605,13 @@ def _generate_evidence_and_objects(
     murder_loc_name = murder_loc.name if murder_loc else "crime scene"
     sr_ev = Evidence(
         id=_uid("ev", rng),
-        name=f"shoe scuffs in the {murder_loc_name}",
+        name=str(rng.choice(_SUSPECT_ROOM_NAMES)).format(room=murder_loc_name),
         evidence_type=EvidenceType.PHYSICAL,
         location_id=murder_location_id,
         linked_character_id=culprit_id,
-        description=f"Shoe prints from a {culprit_traits.build} person found in the room.",
+        description=str(rng.choice(_SUSPECT_ROOM_DESCS)).format(
+            build=culprit_traits.build, room=murder_loc_name,
+        ),
         discovery_difficulty=_sample_difficulty(),
         relevance=EdgeRelevance(
             edge_type=EdgeType.SUSPECT_ROOM,
@@ -423,7 +637,7 @@ def _generate_evidence_and_objects(
     ev_trait_templates = [
         ("fingerprint on doorknob",     "A partial print from someone with {hands} found on a doorknob."),
         ("hair strand",                  "A strand of {hair} caught on a rough surface."),
-        ("torn fabric from clothing",    "A torn fabric scrap — looks like it belongs to someone {build}."),
+        ("torn fabric from clothing",    "A torn fabric scrap -- looks like it belongs to someone {build}."),
         ("footprint near the scene",     "A footprint suggesting a {build} individual."),
         ("smudged handprint on wall",    "A smudged handprint from someone with {hands}."),
         ("scratches on nearby furniture","Scratches consistent with someone who has {hands}."),
@@ -532,7 +746,7 @@ def _generate_evidence_and_objects(
             ),
         )
 
-    # --- Documentary evidence (no relevance — motive support only) ---
+    # --- Documentary evidence (no relevance -- motive support only) ---
     doc_templates = [
         "a threatening letter", "a financial ledger entry",
         "a diary page with incriminating passage", "a forged alibi note",
@@ -696,8 +910,29 @@ _INNOCENT_SOLO_ALIBIS = [
     "I was on the terrace by myself for most of the night.",                      
     "I retired to my room after dinner. I was alone the entire time.",            
     "I had a letter to write. I was at my desk until I went to sleep.",           
-    "I was in the chapel, thinking. I saw no one and no one saw me.",             
-]           
+    "I was in the chapel, thinking. I saw no one and no one saw me.",
+    "I was reading in my room. Nobody was with me.",
+    "I had a headache and went to bed early. There was no one to confirm it.",
+    "I took a long walk in the gardens. I was alone the whole time.",
+    "I sat by myself in the conservatory. I saw nobody.",
+    "I was in the bath when it happened. Quite alone.",
+    "I was in the music room, playing softly. Alone.",
+    "I went up to the gallery to look at the paintings. I was the only one there.",
+    "I retired to my study to work on correspondence. The door was shut.",
+    "I was on the verandah, smoking, alone.",
+    "I dozed in the armchair in my room. No company.",
+    "I had retreated to the orangery. I was alone.",
+    "I went to the wine cellar to fetch a bottle, took my time, came back. Alone.",
+    "I was practising the piano in the music room. I would have heard anyone come in -- nobody did.",
+    "I was outside on the lawn for a smoke. Nobody else came out.",
+    "I was alone in the hall, reading the evening papers.",
+    "I went to the chapel to think. Alone the whole time.",
+    "I was in my bedroom changing. There was no one to see.",
+    "I had retired to the smoking room. I was alone.",
+    "I was in the morning room writing letters. I saw no one.",
+    "I went to bed early. No one looked in on me, more's the pity.",
+]
+
             
 _INNOCENT_PARTIAL_ALIBIS = [   
     "I was with {corrs} until about nine, then I went to bed alone.",           
@@ -705,72 +940,203 @@ _INNOCENT_PARTIAL_ALIBIS = [
     "{corrs} and I were talking for a while. I am not sure of the exact time I left.",                               
     "I was at the gathering with the others for most of it, then slipped away.",  
     "I was with {corrs} in the sitting room. I left before the others did.",      
-    "Ask {corrs} — we were talking for a while. I headed off on my own after that.",                                 
+    "Ask {corrs} -- we were talking for a while. I headed off on my own after that.",                                 
     "I joined {corrs} for a drink, then went to bed. I cannot say exactly when.", 
     "{corrs} saw me in the hall earlier. After that I was alone in my room.",     
     "I was with {corrs} during dinner. The rest of the evening I spent alone.",   
-    "{corrs} and I parted ways after supper. I do not know what they did after.", 
-]           
+    "{corrs} and I parted ways after supper. I do not know what they did after.",
+    "I was with {corrs} for the meal, then went off alone.",
+    "{corrs} and I were chatting in the hall. After that I went to my room alone.",
+    "I joined {corrs} after dinner; we parted around nine.",
+    "{corrs} can confirm I was with them until about half past. I was alone after.",
+    "I was with {corrs} earlier; the latter part of the evening I was on my own.",
+    "{corrs} saw me up to bed; what I did after, only I know.",
+    "I had a drink with {corrs}, then excused myself. Alone after that.",
+    "I was with {corrs} in the parlour for a time. I left to retire.",
+    "{corrs} can vouch for my presence at dinner. I was alone afterwards.",
+    "{corrs} and I were in the library together. I left first.",
+    "I sat with {corrs} after supper; later I went up to my room alone.",
+    "I joined {corrs} for a smoke after dinner. We separated soon after.",
+    "We -- myself and {corrs} -- were together until I went up. Alone after that.",
+    "I was with {corrs} before they retired. Alone for the rest of it.",
+    "I left {corrs} sometime after ten and was on my own thereafter.",
+    "{corrs} and I parted ways after the meal. I cannot account for the next hour.",
+    "I shared a drink with {corrs}; I was alone after that.",
+    "{corrs} saw me in the hall earlier; what I did between then and bed, only I know.",
+    "I was with {corrs} for a portion of it; I was alone for the remainder.",
+    "{corrs} can speak for the early hours. I was alone for the rest.",
+]
+
             
 _INNOCENT_CORROBORATED_ALIBIS = [                                                 
     "I was with {corrs} the entire evening. They can confirm every moment.",    
     "{corrs} and I were together all night. Neither of us left the room.",        
     "Ask {corrs}. We were in each other's company from dinner until well past midnight.",                            
     "I was playing cards with {corrs} all evening. We did not move from that table.",                                
-    "{corrs} will tell you — I was with them the whole time without exception.",  
+    "{corrs} will tell you -- I was with them the whole time without exception.",  
     "I was with {corrs} from the moment dinner ended. You are welcome to check.", 
     "{corrs} and I sat by the fire all evening. We both heard the clock strike midnight.",                           
-    "I have nothing to hide. {corrs} were with me the entire night.",             
-]           
+    "I have nothing to hide. {corrs} were with me the entire night.",
+    "{corrs} and I were together the whole evening. They will testify to it.",
+    "I was with {corrs} from supper through midnight. Ask any of them.",
+    "I never left the company of {corrs}. They will say so.",
+    "{corrs} were with me unbroken. None of us left the room.",
+    "I sat with {corrs} all night. We can all account for one another.",
+    "I was in {corrs}'s presence the entire time. They will confirm.",
+    "{corrs} and I played whist together for hours; we never broke off.",
+    "I never had a moment alone -- {corrs} were with me throughout.",
+    "{corrs} can confirm I was at the table the entire evening.",
+    "Throughout the relevant hours I was with {corrs}. Ask them.",
+    "{corrs} and I were on the terrace together until late. We can vouch for one another.",
+    "I was in {corrs}'s company unbroken; we did not part.",
+    "{corrs} and I sat by the fire the entire evening. There was no break.",
+    "I was at the long table with {corrs} from supper onward.",
+    "{corrs} and I were together from just after dinner until well past the murder hour.",
+    "I had no time alone -- {corrs} were always with me.",
+    "{corrs} will tell you we were inseparable that evening.",
+    "I never moved from where {corrs} sat with me.",
+    "{corrs} -- they can each speak for me, the entire evening.",
+    "I was with {corrs} for every minute. None of us left the parlour.",
+    "{corrs} and I had a private game of cards from supper until late. Inseparable.",
+    "{corrs} and I never broke company; they will testify to that fact.",
+]
+
             
 # --- Culprit alibi templates (content always false) ---                          
         
-_CULPRIT_SOLO_ALIBIS = [       
-    "I was alone in my room the entire evening.",                               
-    "I retired early — I had a headache. No one saw me after dinner.",            
-    "I spent the evening alone in the library, reading.",                         
-    "I walked the estate grounds by myself after supper.",                        
-    "I was in the study going over correspondence. The door was closed.",         
-    "I went to bed early. I heard nothing unusual.",                              
-    "I took a long bath and then slept. I spoke to no one.",                      
-    "I had a private matter to attend to in my room. I did not leave all night.", 
-    "I was in the wine cellar cataloguing bottles. No one else was down there.",  
-    "I sat alone on the terrace watching the sky. I spoke to no one.",            
-    "I do not feel I need to account for my evening. I was simply alone.",        
-    "I was writing letters in my room. I came out only for water.",               
-]           
+_CULPRIT_SOLO_ALIBIS = [
+    "I was in my room the entire evening.",
+    "I retired early. I had a headache and did not return downstairs.",
+    "I spent the evening in the library, reading.",
+    "I walked the estate grounds after supper.",
+    "I was in the study going over correspondence. The door was closed.",
+    "I went to bed early. I heard nothing unusual.",
+    "I took a long bath and then went to bed.",
+    "I had private matters to attend to in my room. I did not leave all night.",
+    "I was in the wine cellar cataloguing bottles.",
+    "I sat on the terrace watching the sky.",
+    "I do not feel I need to account for my evening in detail.",
+    "I was writing letters in my room. I came out only for water.",
+    "I was reading in my study.",
+    "I had a headache and went to lie down.",
+    "I was on the terrace for some air.",
+    "I was writing letters in my room.",
+    "I had a long bath and then read.",
+    "I sat in the conservatory thinking.",
+    "I retired to the chapel for a few minutes.",
+    "I went to the cellar to find something.",
+    "I was in the gallery. The light was poor.",
+    "I dozed in my room after dinner.",
+    "I was on the back terrace, smoking.",
+    "I had retired to my study. I cannot recall hearing anything from elsewhere.",
+    "I needed quiet, so I withdrew to the music room.",
+    "I was in the hall, glancing over the evening papers.",
+    "I was in the orangery, walking off the meal.",
+    "I went up to my room early and stayed there.",
+    "I was in the morning room, going over correspondence.",
+    "I had withdrawn to the boot room briefly.",
+]
+
             
 _CULPRIT_PARTIAL_ALIBIS_NO_WITNESS = [                                            
-    "I was at dinner with the others until around nine. After that, I was alone.",                                 
-    "I left the card game early and spent the rest of the evening alone in my room.",                                
+    "I was at dinner with the others until around nine. After that, I retired.",
+    "I left the card game early and spent the rest of the evening in my room.",
     "I spent the early part of the evening with the group, then slipped away.",
-    "I joined the gathering briefly, then retired. I spoke to no one after that.",
-    "I was visible to others for the first part of the evening. Afterwards I was entirely alone.",                   
-]           
+    "I joined the gathering briefly, then retired.",
+    "I was visible to others for the first part of the evening. Afterwards I was attending to private matters.",
+    "I joined the gathering at first, then slipped away. The rest of the evening I spent in my study.",
+    "I was visible early on; afterwards I withdrew.",
+    "I went to my room around nine and stayed there.",
+    "After supper I retired to my room.",
+    "I was with the company at supper; later I withdrew.",
+    "Early in the evening I was with everyone. Then I withdrew.",
+    "I excused myself shortly after the meal. I withdrew to my own quarters.",
+    "I was at table with them and afterwards in the library.",
+    "I retired early. The household had quieted by then.",
+    "I joined drinks for a time then withdrew.",
+    "I was around for the meal; later I retired.",
+    "I was visible to the others before I withdrew.",
+    "I left the others around half past nine. I retired to my room.",
+    "I sat at table with them; afterwards I withdrew.",
+    "I had a brief presence in the parlour, then I retired.",
+    "I excused myself after the meal and withdrew.",
+    "I left the company shortly after dinner -- I went to attend to my own affairs.",
+    "I retired to my room around the time in question.",
+    "I was at supper with them; the rest of the evening I spent quietly.",
+    "I excused myself early. I had matters of my own to attend to.",
+    "I was visible at the table; afterwards I was in my study.",
+    "I joined the others briefly; then withdrew.",
+    "I sat with the company for a time, then I left them.",
+    "I was at the gathering at first; then I retired.",
+]
+
             
 _CULPRIT_PARTIAL_ALIBIS_WITH_WITNESS = [                                          
-    "I was talking with {corrs} in the hall for most of the evening, then went to my room alone.",                 
-    "I was in the drawing room with {corrs} until the clock struck ten, then I retired alone.",                      
-    "I joined {corrs} for drinks after supper, but I left early. After that I was by myself.",                       
-    "I was with {corrs} briefly in the garden, then I went for a solitary walk.", 
-    "I had a drink with {corrs} near the fire, then excused myself. I did not see anyone after that.",               
-    "I sat with {corrs} at dinner. After the meal I slipped off alone — they can confirm I left early.",             
-    "{corrs} saw me in the corridor earlier in the evening. After that, I was on my own.",                           
-    "I left {corrs} in the parlour around half past nine. The rest of the evening I spent alone.",                   
-    "Ask {corrs} — they will tell you I was there for dinner. What I did after is my own business.",                 
-    "{corrs} and I shared a drink. I excused myself shortly after. I went nowhere near that part of the house.",     
-]           
+    "I was talking with {corrs} in the hall for most of the evening, then went to my room.",
+    "I was in the drawing room with {corrs} until the clock struck ten, then I retired.",
+    "I joined {corrs} for drinks after supper, but I left early.",
+    "I was with {corrs} briefly in the garden, then I went for a walk.",
+    "I had a drink with {corrs} near the fire, then excused myself.",
+    "I sat with {corrs} at dinner. After the meal I slipped off -- they can confirm I left early.",
+    "{corrs} saw me in the corridor earlier in the evening.",
+    "I left {corrs} in the parlour around half past nine.",
+    "Ask {corrs} -- they will tell you I was there for dinner. What I did after is my own business.",
+    "{corrs} and I shared a drink. I excused myself shortly after.",
+    "I was with {corrs} at supper, then I went off about my own affairs.",
+    "{corrs} can confirm I was with them earlier.",
+    "I left {corrs} after our drink and went up to my room.",
+    "I was in {corrs}'s company at the start.",
+    "I shared a smoke with {corrs}.",
+    "{corrs} saw me at table.",
+    "I was with {corrs} in the corridor briefly.",
+    "{corrs} and I parted shortly after dinner.",
+    "I left {corrs} in the parlour and went to my room.",
+    "{corrs} can speak for the early evening.",
+    "I was with {corrs} for a glass of port.",
+    "{corrs} saw me in the drawing room before I retired.",
+    "I sat with {corrs} for a quarter-hour, then went off.",
+    "I joined {corrs} briefly.",
+    "{corrs} can put me in the hall earlier.",
+    "I left {corrs} after a brief conversation.",
+    "I was with {corrs} until about half past.",
+    "{corrs} and I shared a drink, then I retired.",
+    "I left {corrs} chatting and went up to my room.",
+    "{corrs} saw me at supper, after which I went up.",
+]
+
             
 _CULPRIT_GAP_CORROBORATED_ALIBIS = [                                              
     "{corrs} and I were together most of the evening. I may have stepped out briefly, but it was nothing.",        
-    "Ask {corrs} — we were together all night. I went to get a drink at some point, but I was not gone long.",       
+    "Ask {corrs} -- we were together all night. I went to get a drink at some point, but I was not gone long.",       
     "{corrs} will confirm I was there. I slipped out for some air, five minutes at most.",                           
-    "I was with {corrs} the entire time, more or less. I left the room once — I cannot imagine it matters.",         
+    "I was with {corrs} the entire time, more or less. I left the room once -- I cannot imagine it matters.",         
     "{corrs} and I sat together all evening. I may have excused myself briefly at some point.",                      
     "I was in {corrs}'s company. There was a moment I stepped away, but {corrs} knew where I was going.",            
     "{corrs} can confirm my presence. I left for a short while but came straight back.",                             
-    "{corrs} were with me. If I was away for a moment, it was not long enough to matter.",                           
-]           
+    "{corrs} were with me. If I was away for a moment, it was not long enough to matter.",
+    "I was with {corrs} the whole time, more or less. A brief absence, perhaps.",
+    "{corrs} can speak for me. I left for a moment to fetch a drink, no more.",
+    "{corrs} and I sat together. I may have stepped out briefly.",
+    "{corrs} were with me. I stepped out for some air -- a few minutes only.",
+    "Ask {corrs}. I was with them; I stepped away momentarily.",
+    "{corrs} and I were inseparable, save a moment when I went to the cellar.",
+    "I was with {corrs} throughout. I left briefly; nothing of consequence.",
+    "{corrs} can confirm. I stepped out for a few minutes only.",
+    "{corrs} and I were together; I went for water at one point.",
+    "I was in {corrs}'s company. There was a moment I went outside.",
+    "I was with {corrs}. I left only briefly, and returned.",
+    "{corrs} can vouch -- I stepped out for a moment, that was all.",
+    "I was with {corrs} all evening. A brief absence, nothing more.",
+    "{corrs} and I were together. I stepped out -- a momentary thing.",
+    "{corrs} were with me; I left for a moment to attend to something.",
+    "{corrs} can speak for my whereabouts. I stepped out briefly.",
+    "I was with {corrs} most of the night; I went to the kitchen briefly.",
+    "{corrs} can confirm my presence. There was a short absence, nothing more.",
+    "I was with {corrs} the whole time, except for a moment I went to fetch something.",
+    "{corrs} and I sat together. I stepped out briefly for some air.",
+    "I was with {corrs}. I left for a few minutes only -- it was nothing.",
+]
+
             
 _CULPRIT_FALSE_CORROBORATED_ALIBIS = [                                            
     "I was with {corrs} all evening. Ask them.",                                
@@ -778,14 +1144,33 @@ _CULPRIT_FALSE_CORROBORATED_ALIBIS = [
     "I spent the evening playing cards with {corrs}. They will confirm.",         
     "{corrs} can vouch for my whereabouts. We were together.",                    
     "I never left {corrs}'s sight all evening.",                                  
-    "You can ask {corrs} — we were in the billiard room from eight until midnight.",                                 
+    "You can ask {corrs} -- we were in the billiard room from eight until midnight.",                                 
     "{corrs} and I were at the far end of the estate. Neither of us went near that wing.",                           
     "I have witnesses: {corrs}. All of them saw me the entire time.",             
     "{corrs} were with me the whole evening. None of us moved from the sitting room.",                               
-    "We — {corrs} and I — sat together well past the hour in question.",          
+    "We -- {corrs} and I -- sat together well past the hour in question.",          
     "{corrs} will tell you I never moved. We were in plain sight of each other.", 
-    "I was not alone. {corrs} were there. They saw everything.",                  
-]           
+    "I was not alone. {corrs} were there. They saw everything.",
+    "I was with {corrs} the entire evening. None of us moved.",
+    "{corrs} and I sat together from supper onwards; we did not part.",
+    "I never left {corrs}'s company all evening.",
+    "I was with {corrs} from start to finish. Ask them.",
+    "{corrs} can speak for me unbroken; we were together throughout.",
+    "I was in {corrs}'s sight the whole night.",
+    "{corrs} were with me from supper to bed.",
+    "I was at cards with {corrs} the whole evening; we never moved.",
+    "{corrs} and I shared a quiet evening together; we did not part once.",
+    "{corrs} can attest -- I was with them from after supper to long past midnight.",
+    "I was at the table with {corrs} the whole time. None of us left.",
+    "{corrs} and I were inseparable that evening. They will say so.",
+    "I had no opportunity to be elsewhere -- {corrs} were with me.",
+    "{corrs} can swear to my presence; we were together throughout.",
+    "{corrs} and I sat by the window all evening.",
+    "I was with {corrs} from supper to the small hours.",
+    "I had no break at all -- {corrs} were always with me.",
+    "{corrs} can confirm I never left their company that night.",
+]
+
             
             
 def _format_names(names: list[str]) -> str:                                     
@@ -889,13 +1274,13 @@ def _generate_alibis(
             culprit.has_alibi = False                                           
 
         elif alibi_roll < w[1]:
-            # Solo — false, unverifiable
+            # Solo -- false, unverifiable
             culprit.has_alibi = True                                              
             culprit.alibi_details = _CULPRIT_SOLO_ALIBIS[int(rng.integers(len(_CULPRIT_SOLO_ALIBIS)))]
             culprit.alibi_corroboration_is_genuine = True                         
             
         elif alibi_roll < w[2]:
-            # Partial — false, admits a gap, no alibi_corroborator_id             
+            # Partial -- false, admits a gap, no alibi_corroborator_id             
             culprit.has_alibi = True                                              
             if others and rng.random() < 0.6:
                 corrs = _pick_corroborators(others, min(config.max_corroborators, 3))                                
@@ -908,7 +1293,7 @@ def _generate_alibis(
             culprit.alibi_corroboration_is_genuine = True
             
         elif alibi_roll < w[3]:                                                 
-            # Gap-corroborated — corroborators honest but missed a window         
+            # Gap-corroborated -- corroborators honest but missed a window         
             culprit.has_alibi = True                                            
             if others:         
                 corrs = _pick_corroborators(others, min(config.max_corroborators, 3))
@@ -923,7 +1308,7 @@ def _generate_alibis(
                 culprit.alibi_corroboration_is_genuine = True                     
         
         else:                  
-            # Full false — lying corroborators                                  
+            # Full false -- lying corroborators                                  
             culprit.has_alibi = True
             if others:         
                 corrs = _pick_corroborators(others, min(config.max_corroborators, 3))
@@ -1044,9 +1429,9 @@ def _generate_crime_scene_clues(
     Generate 3 convergent clue types that let the agent deduce the true murder location
     even when the body was moved:
 
-    1. Body trace  — room material found on/near the victim
-    2. Drag trail  — scuff marks in intermediate rooms along the drag path
-    3. Testimony   — an NPC near the murder room heard a disturbance
+    1. Body trace  -- room material found on/near the victim
+    2. Drag trail  -- scuff marks in intermediate rooms along the drag path
+    3. Testimony   -- an NPC near the murder room heard a disturbance
     """
     evidence: dict[str, Evidence] = {}
     murder_loc = locations[murder_location_id]
@@ -1061,17 +1446,17 @@ def _generate_crime_scene_clues(
     amb = config.body_trace_ambiguity
     if amb <= 1:
         trace_desc = (
-            f"Traces of {specific_material} found on the victim — "
+            f"Traces of {specific_material} found on the victim -- "
             f"characteristic of the {murder_loc.name}."
         )
     elif amb == 2:
         trace_desc = (
-            f"Traces of {specific_material} found on the victim — "
+            f"Traces of {specific_material} found on the victim -- "
             f"a material found in one of the estate's rooms."
         )
     elif amb == 3:
         trace_desc = (
-            f"Traces of {vague_material} found on the victim — "
+            f"Traces of {vague_material} found on the victim -- "
             f"the exact source room is unclear."
         )
     else:  # amb >= 4: multiple candidate rooms share the same vague description
@@ -1087,7 +1472,7 @@ def _generate_crime_scene_clues(
         candidate_names = candidate_names[:3]
         room_list = " or ".join(f"the {r}" for r in candidate_names)
         trace_desc = (
-            f"Ambiguous {vague_material} residue on the victim — "
+            f"Ambiguous {vague_material} residue on the victim -- "
             f"consistent with material from {room_list}."
         )
 
@@ -1140,7 +1525,7 @@ def _generate_crime_scene_clues(
             testimony = f"I heard a commotion coming from the {murder_loc.name} that evening."
         elif spec >= 0.5:
             testimony = (
-                "There was some kind of disturbance from that part of the house — "
+                "There was some kind of disturbance from that part of the house -- "
                 "I cannot say exactly where."
             )
         else:
@@ -1212,7 +1597,7 @@ def generate_mystery(
         murder_step = int(rng.integers(1, max(2, config.num_time_steps // 2)))
         motive = culprit.motive or "unknown"
 
-        # 3b. Body location — may differ from murder location at higher difficulties
+        # 3b. Body location -- may differ from murder location at higher difficulties
         if (
             config.body_moved_prob > 0.0
             and rng.random() < config.body_moved_prob
@@ -1346,7 +1731,7 @@ def generate_mystery(
         # --- Culprit alibi ---
         if CharacterRole.SUSPECT in culprit.roles and murder_loc_obj:
             if config.evidence_ambiguity <= 0.1:
-                # TRIVIAL/EASY — Type A: one claim at murder_step claiming a different room
+                # TRIVIAL/EASY -- Type A: one claim at murder_step claiming a different room
                 alibi_loc = next(
                     (l for l in state.locations.values()
                      if l.id != murder_location_id and l.id != body_location_id),
@@ -1362,7 +1747,7 @@ def generate_mystery(
                         time_style=style,
                     )]
             else:
-                # MEDIUM+ — Type B: two claims bracketing the murder through adjacent rooms
+                # MEDIUM+ -- Type B: two claims bracketing the murder through adjacent rooms
                 adjacent_to_murder = [
                     state.locations[adj_id]
                     for adj_id in murder_loc_obj.adjacent_ids
@@ -1400,7 +1785,7 @@ def generate_mystery(
                             blocked_until_step=min(config.num_time_steps - 1, murder_step + 1),                                                                                                                                                                                                                                                                                                                                
                         ))                                                                                                                                                                                                                                                                                                                                                                                                     
                 else:         
-                    # Murder room has fewer than 2 neighbours — Type B impossible; fall back to Type A.                                                                                                                                                                                                                                                                                                                            
+                    # Murder room has fewer than 2 neighbours -- Type B impossible; fall back to Type A.                                                                                                                                                                                                                                                                                                                            
                     alibi_loc = next(                                                                  
                         (l for l in state.locations.values()                                                                                                                                                                                                                                                                                                                                                                       
                         if l.id != murder_location_id and l.id != body_location_id),

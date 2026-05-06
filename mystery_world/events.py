@@ -92,7 +92,7 @@ def weather_is_bad(weather: str) -> bool:
     return weather in {"heavy_rain", "thunderstorm", "snow"}
 
 # ---------------------------------------------------------------------------
-# Event processors — each returns a list of WorldEvents
+# Event processors -- each returns a list of WorldEvents
 # ---------------------------------------------------------------------------
 
 def process_weather(state: "WorldState", rng: np.random.Generator) -> list[WorldEvent]:
@@ -259,11 +259,11 @@ def _set_culprit_next_goal(culprit: "Character", state: "WorldState", rng: np.ra
 
     Mirrors innocent NPC routine for camouflage. Occasionally initiates a tamper     
     run: heads directly to the most threatening evidence, acts immediately (dwell=0),
-    then returns home. Tamper runs are probability-gated — not triggered every step. 
+    then returns home. Tamper runs are probability-gated -- not triggered every step. 
     """                                                                              
     threat_loc = _most_threatening_evidence_loc(culprit, state)                      
                                                                                    
-    # Just arrived at an evidence location — process_culprit_tampering handles the   
+    # Just arrived at an evidence location -- process_culprit_tampering handles the   
     # actual tamper this same step. Culprit leaves promptly without lingering.
     if threat_loc is not None and threat_loc == culprit.location_id:                 
         culprit.movement_dwell_steps = 0                                             
@@ -280,11 +280,11 @@ def _set_culprit_next_goal(culprit: "Character", state: "WorldState", rng: np.ra
         and threat_loc != culprit.location_id                                        
         and rng.random() < state.config.culprit_tamper_prob
     ):                                                                               
-        culprit.movement_dwell_steps = 0  # no loitering — move immediately
+        culprit.movement_dwell_steps = 0  # no loitering -- move immediately
         culprit.movement_goal_location_id = threat_loc                               
         return
                                                                                    
-    # Normal routine — identical structure to innocent NPC (camouflage).             
+    # Normal routine -- identical structure to innocent NPC (camouflage).             
     at_home = culprit.location_id == culprit.home_location_id
     if at_home:                                                                      
         culprit.movement_dwell_steps = int(rng.integers(2, 5))
@@ -309,7 +309,7 @@ def process_npc_movement(state: "WorldState", rng: np.random.Generator) -> list[
     Option B (reactive_events=True): routine-based movement for all characters.
     - Innocents have a home base, make social visits and errands, dwell naturally. 
     - Culprit follows the same visible routine but occasionally makes tamper runs. 
-    - Both use the same movement system — culprit is not distinguishable by        
+    - Both use the same movement system -- culprit is not distinguishable by        
         movement pattern alone.                                                      
     """                                                                              
     from mystery_world.entities import CharacterRole                                 
@@ -349,12 +349,12 @@ def process_npc_movement(state: "WorldState", rng: np.random.Generator) -> list[
         if char.home_location_id is None:
             char.home_location_id = char.location_id                                 
                 
-        # Dwelling — count down and stay put                                         
+        # Dwelling -- count down and stay put                                         
         if char.movement_dwell_steps > 0:
             char.movement_dwell_steps -= 1                                           
             continue
                                                                                    
-        # At goal or no goal — decide what to do next                                
+        # At goal or no goal -- decide what to do next                                
         if (
             char.movement_goal_location_id is None                                   
             or char.movement_goal_location_id == char.location_id
@@ -365,7 +365,7 @@ def process_npc_movement(state: "WorldState", rng: np.random.Generator) -> list[
                 _set_innocent_next_goal(char, state, rng)
             continue  # goal just assigned; start moving next step                   
                                                                                    
-        # Have a goal and not yet there — move one step toward it                    
+        # Have a goal and not yet there -- move one step toward it                    
         next_id = _next_step_toward(state, char.location_id, char.movement_goal_location_id)                                                                                                                                                                                                                                                                  
         if next_id:
             old_loc_id = char.location_id

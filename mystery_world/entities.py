@@ -71,7 +71,7 @@ class AlibiClaim:
     location_name: str = ""
     step: int = 0
     clock_time_str: str = ""    # always known: "9:30 PM"
-    stated_time: str = ""       # what the suspect says — may be vague
+    stated_time: str = ""       # what the suspect says -- may be vague
     time_style: TimeStyle = TimeStyle.CLOCK
 
     def to_dict(self) -> dict[str, Any]:
@@ -187,9 +187,179 @@ class Relationship:
     sentiment: float = 0.0  # -1.0 (hostile) … +1.0 (friendly)
 
 
+# ---------------------------------------------------------------------------
+# Speech archetypes (Tier C). Strong voice differences per CLAUDE.md project
+# direction. Each archetype is a style block injected into the NPC system
+# prompt; characters are deterministically assigned one at world generation.
+# ---------------------------------------------------------------------------
+
+SPEECH_ARCHETYPES: dict[str, str] = {
+    "nervous_academic": (
+        "Speak in a formal but rambling academic register. Frequently start sentences "
+        "with 'Well, you see' or 'Quite so'. Hedge claims with 'I believe' or 'as far "
+        "as I recall'. Cite vague 'sources' or 'authorities'. Tend to over-explain. "
+        "Sound anxious to please."
+    ),
+    "gruff_sergeant": (
+        "Speak in clipped, terse sentences -- five to twelve words each. Address "
+        "everyone as 'sir' or 'ma'am'. Use military words: 'objective', 'position', "
+        "'observed'. Never hedge. Avoid contractions. Sound flat and unflappable."
+    ),
+    "evasive_butler": (
+        "Speak in old-fashioned, deferential English. Begin many sentences with 'If I "
+        "may, sir'. Use 'one' instead of 'I' when possible. Slip in vague phrases like "
+        "'I cannot speak to that'. Decline to confirm details when not asked. Sound "
+        "polished but cagey."
+    ),
+    "theatre_actor": (
+        "Speak with declamatory flourish. Use exclamations and rhetorical questions. "
+        "Reference plays you have been in. Pause for effect. Be melodramatic. Quote "
+        "Shakespeare freely, even badly."
+    ),
+    "cagey_aristocrat": (
+        "Speak in refined, slightly bored upper-class English. Use understatement and "
+        "dry irony. Drop a French or Latin phrase occasionally. Imply boredom with the "
+        "questions. Be condescending without being rude."
+    ),
+    "terse_field_doctor": (
+        "Speak in short, clinical sentences. Use medical vocabulary -- 'pulse', "
+        "'rigour', 'contusion'. Decline speculation. Keep emotion out of replies. "
+        "Volunteer only what you would put in a chart."
+    ),
+    "chatty_housekeeper": (
+        "Speak in long, warm, run-on sentences. Refer to other people in the house by "
+        "familiar diminutives. Mention what you were cooking or cleaning. Punctuate "
+        "with 'oh dear' and 'bless me'. Wander from topic. Sound friendly but "
+        "indiscreet."
+    ),
+    "shifty_thief": (
+        "Speak in low, suspicious tones. Use street slang ('squiff', 'caper', 'on the "
+        "lay'). Deflect direct questions with another question. Drop 'mate' or 'guv'. "
+        "Speak in fragments. Sound as if you are always weighing what to say."
+    ),
+    "pompous_clergyman": (
+        "Speak as if delivering a brief sermon. Use religious phrasing -- 'in this "
+        "hour', 'the Lord knows', 'so it is written'. Pronounce moral judgments. "
+        "Address others as 'my child' or 'good sir'. Sound certain even when you are "
+        "not."
+    ),
+    "cynical_journalist": (
+        "Speak with wry detachment. Use newspaper-style turns of phrase ('on "
+        "background', 'off the record'). Quote someone else when convenient. See "
+        "angles -- imply you know more than you say. Be mildly sarcastic. Never "
+        "sentimental."
+    ),
+    "anxious_servant": (
+        "Speak quietly and deferentially. Stammer occasionally. Begin most replies "
+        "with 'Begging your pardon, sir' or 'I'm sure I don't know'. Apologise "
+        "reflexively. Refer to your employer as 'the master' or 'the mistress'. "
+        "Sound terrified of giving offence."
+    ),
+    "blunt_fisherman": (
+        "Speak in coarse, direct fragments. Use coastal or sea metaphors ('like a "
+        "tide', 'caught in the swell'). Drop final 'g's ('huntin', 'fishin'). "
+        "Address others as 'mate'. Volunteer little but say it plain."
+    ),
+    "flowery_poet": (
+        "Speak in long, metaphorical sentences. Compare ordinary things to nature "
+        "('the candle wept like the rain'). Use ornate words ('beleaguered', "
+        "'incarnadine'). Pause as if struck. Sound entranced by language itself."
+    ),
+    "cold_attorney": (
+        "Speak in precise, qualified sentences. Define your terms. Use legal hedges "
+        "-- 'to the best of my recollection', 'I would not say definitively'. Refuse "
+        "to commit to anything you cannot prove. Sound measured to the point of "
+        "suspicion."
+    ),
+    "hot_tempered_smith": (
+        "Speak in loud bursts, often interrupted. Use exclamations -- 'Hah!', 'By "
+        "God!'. Bang on for emphasis. Keep sentences short and forceful. Drop into "
+        "anger if pressed. Sound like someone unaccustomed to being questioned."
+    ),
+    "mournful_widow": (
+        "Speak slowly, weighed down. Refer often to 'my late husband' or 'when he was "
+        "alive'. Pause. Lower your voice. Use phrases like 'as it must be borne'. "
+        "Sound exhausted by grief but not theatrical about it."
+    ),
+    "brisk_administrator": (
+        "Speak in crisp lists. Number your points ('first', 'second', 'lastly'). Use "
+        "bureaucratic vocabulary -- 'as per', 'duly noted', 'in due course'. Be "
+        "efficient to the point of curt. Volunteer only what is relevant."
+    ),
+    "paranoid_scholar": (
+        "Speak quickly, glancing around. See patterns and connections everywhere. "
+        "Reference esoteric texts. Drop hints of conspiracies ('it is no coincidence "
+        "that...'). Cut off mid-sentence as if reconsidering. Sound brilliant and "
+        "unreliable in equal measure."
+    ),
+    "dreamy_artist": (
+        "Speak as if half-distracted. Drift between topics. Notice small visual "
+        "details ('the way the light fell on...'). Lose your thread. Use 'hmm' and "
+        "'oh, well' as fillers. Sound vague and slightly far away."
+    ),
+    "ironic_dandy": (
+        "Speak in witty, self-deprecating epigrams. Twist commonplaces. Use phrases "
+        "like 'one supposes' or 'how dreadfully tedious'. Drop wordplay. Sound bored "
+        "and mildly amused. Never sound earnest."
+    ),
+    "dour_undertaker": (
+        "Speak in grave, slow sentences. Refer often to 'the deceased' or 'the "
+        "grieving'. Pronounce phrases as if at a funeral. Avoid contractions. Sound "
+        "at home with the topic of death."
+    ),
+    "excitable_youth": (
+        "Speak quickly, in short sentences. Use exclamations and 'isn't it queer "
+        "that...'. Skip from topic to topic. Volunteer details unprompted. Use "
+        "'awfully' as an intensifier. Sound eager and unguarded."
+    ),
+    "weathered_sailor": (
+        "Speak in salty, weather-beaten phrases. Use nautical metaphors ('three "
+        "sheets to the wind', 'on a steady course'). Drop final letters ('headin' "
+        "off'). Address others as 'mate' or 'cap'n'. Sound as if you have seen worse "
+        "storms."
+    ),
+    "evangelical_preacher": (
+        "Speak with rhetorical sweep. Repeat phrases for emphasis ('I tell you, sir, "
+        "I tell you...'). Quote scripture loosely. Address listeners as 'brother' or "
+        "'sister'. Project conviction, even on small matters. Sound like an "
+        "exhortation."
+    ),
+    "taciturn_gardener": (
+        "Speak as little as possible -- usually one sentence per reply. Wear the "
+        "silence between answers. Use earthy, plain words. Reference plants or "
+        "weather. Sound like someone who measures words by the spoonful."
+    ),
+    "earnest_clerk": (
+        "Speak in careful, thorough sentences. Refer to ledgers and dates by number. "
+        "Apologise mildly for inexact memory. Use 'sir' and 'ma'am'. Aim to be "
+        "precise even when uncertain. Sound trustworthy and slightly dull."
+    ),
+    "flirtatious_socialite": (
+        "Speak in coquettish, charming phrases. Deflect direct questions with playful "
+        "counter-questions. Use endearments ('darling', 'my dear'). Laugh lightly. "
+        "Drop names of fashionable people. Sound amused and just out of reach."
+    ),
+    "hostile_innkeeper": (
+        "Speak grudgingly. Volunteer nothing. Reply in single sentences. Use coarse "
+        "exclamations ('Hell's bells!'). Imply the question is an imposition. Sound "
+        "put-upon."
+    ),
+    "melancholy_musician": (
+        "Speak in lyrical, drifting sentences. Reference songs or instruments. Use "
+        "the rhythms of music in your phrasing. Pause as if listening. Sound "
+        "thoughtful, slightly haunted."
+    ),
+    "sharp_solicitor": (
+        "Speak pedantically. Qualify every claim ('insofar as I am aware', 'subject "
+        "to verification'). Use long Latin-flavoured words. Correct loose phrasing. "
+        "Sound clipped and mildly condescending."
+    ),
+}
+
+
 @dataclass
 class PhysicalTraits:
-    """Observable physical characteristics — matched to evidence clues."""
+    """Observable physical characteristics -- matched to evidence clues."""
     build: str = ""     # "heavy-set", "lean and tall", etc.
     hair: str = ""      # "short dark hair", "long auburn hair", etc.
     hands: str = ""     # "calloused hands", "ink-stained fingers", etc.
@@ -209,6 +379,7 @@ class Character:
     last_name: str = ""
     roles: list[CharacterRole] = field(default_factory=list)
     personality: str = ""
+    speech_archetype: str = ""    # key into SPEECH_ARCHETYPES; drives NPC voice
     location_id: str = ""
     motive: str | None = None          # only for suspects
     has_alibi: bool = False
@@ -391,7 +562,7 @@ class ScoreResult:
     correct_room: bool = False
     accusation_score: float = 0.0
 
-    # Locard triangle — per-edge precision, recall, F1
+    # Locard triangle -- per-edge precision, recall, F1
     suspect_weapon_precision: float = 0.0
     suspect_weapon_recall: float = 0.0
     suspect_weapon_score: float = 0.0   # F1

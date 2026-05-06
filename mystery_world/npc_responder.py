@@ -2,7 +2,7 @@
 NPC response engine for stateful interview interactions.
 
 Lying is injected into the system prompt from ground-truth flags.
-The LLM has no agency over whether to lie — that decision comes from WorldState.
+The LLM has no agency over whether to lie -- that decision comes from WorldState.
 Uses any OpenAI-compatible endpoint (vLLM, Together AI, etc.).
 """
 
@@ -84,12 +84,21 @@ def _lying_instruction(char: "Character", state: "WorldState") -> str:
     parts: list[str] = []
 
     if char.is_culprit:
-        alibi_claim = char.alibi_details or "you were alone and did not see anyone"
+        alibi_claim = char.alibi_details or "you were attending to private matters of your own"
         parts.append(
             "IMPORTANT: You committed the murder. Never admit this under any circumstances. "
             f"If asked about your whereabouts at the time of the crime, claim: \"{alibi_claim}\". "
             "If pressed hard, deflect by expressing concern or casting vague suspicion on others. "
             "Do not contradict yourself."
+        )
+        parts.append(
+            "DO NOT VOLUNTEER ALONENESS. Never use the words 'alone', 'by myself', "
+            "'no one saw me', 'nobody was with me', 'I spoke to no one', 'I had no "
+            "company', or similar declarations of solitude unless the detective "
+            "directly asks whether you were alone. Describe what you were doing "
+            "without naming a witness and without denying one. If asked an open "
+            "question like 'where were you?', name the place and the activity only. "
+            "Volunteering aloneness is a confession-adjacent tell."
         )
     elif (
         culprit is not None
@@ -99,10 +108,38 @@ def _lying_instruction(char: "Character", state: "WorldState") -> str:
         parts.append(
             f"IMPORTANT: You have agreed to provide a false alibi for {culprit.full_name}. "
             f"If asked where {culprit.full_name} was, confirm they were with you. "
-            "Do not admit this arrangement — act as if it is the simple truth."
+            "Do not admit this arrangement -- act as if it is the simple truth."
         )
 
     return "\n".join(parts)
+
+
+def derive_npc_gloss(
+    char: "Character", state: "WorldState", question: str | None = None,
+) -> str:
+    """Canonical underlying claim from the NPC, in plain English.
+
+    Strong-voice mode (Tier C) makes parsing styled NPC dialogue hard; the
+    gloss is a question-independent summary of the NPC's whereabouts claim,
+    derived from world state, so agents that fail to parse the styled
+    response can still extract the underlying fact. This is the public
+    benchmark's narrator-gloss companion to NPC dialogue.
+    """
+    if char.has_alibi and char.alibi_details:
+        return f"Whereabouts claim: {char.alibi_details}"
+    for other in state.characters.values():
+        if (
+            getattr(other, "alibi_corroborator_id", None) == char.id
+            and getattr(other, "alibi_corroboration_is_genuine", False)
+            and other.is_alive
+        ):
+            other_loc = state.locations.get(other.location_id)
+            other_loc_name = other_loc.name if other_loc else "an unspecified room"
+            return (
+                f"Whereabouts claim: was with {other.full_name} in the "
+                f"{other_loc_name} during the relevant time."
+            )
+    return "Whereabouts claim: no alibi provided."
 
 
 def build_npc_system_prompt(char: "Character", state: "WorldState") -> str:
@@ -113,7 +150,7 @@ def build_npc_system_prompt(char: "Character", state: "WorldState") -> str:
     current_loc_name = current_loc.name if current_loc else "unknown"
 
     # Check if this character is a genuine alibi corroborator for another suspect.
-    # If so, their whereabouts line must reflect being with that suspect — not "alone".
+    # If so, their whereabouts line must reflect being with that suspect -- not "alone".
     corroborated_suspect = None
     for other in state.characters.values():
         if (
@@ -146,8 +183,17 @@ def build_npc_system_prompt(char: "Character", state: "WorldState") -> str:
         c.full_name for c in state.characters.values() if c.id != char.id and c.is_alive
     )
 
+    from mystery_world.entities import SPEECH_ARCHETYPES
+    style_block = SPEECH_ARCHETYPES.get(
+        char.speech_archetype,
+        "Speak in plain, direct English.",
+    )
+
     return f"""You are {char.full_name}, a {char.personality} {role_label} being questioned by a detective about a recent murder.
 You are {char.full_name}. You are currently in the {current_loc_name}.
+
+VOICE -- speak in this distinct style at all times:
+{style_block}
 
 WHAT YOU KNOW (these are the ONLY facts you may draw on):
 Your whereabouts: {alibi_line}
@@ -159,14 +205,15 @@ Your relationships:
 The only locations that exist: {known_locations}.
 The only other people: {known_people}.
 
-STRICT RULES — follow these exactly:
+STRICT RULES -- follow these exactly:
 - You are {char.full_name}. Never refer to yourself in the third person.
 - You may ONLY state facts listed above. Do NOT invent any other names, locations, times, or events.
-- If asked about something not in your knowledge above, say "I don't know" or "I don't recall" — never fabricate.
+- If asked about something not in your knowledge above, say "I don't know" or "I don't recall" -- never fabricate.
 - Do not mention any room, person, or object not in the lists above.
 - Be consistent with everything you have already said in this conversation.
 - Keep responses to 1-3 sentences. Stay in character at all times.
 - Do not volunteer information the detective has not asked about.
+- Apply the VOICE style above to every word you speak.
 {lying_block}"""
 
 
@@ -197,7 +244,7 @@ class NPCResponder:
         api_key:
           - If you point at OpenAI / Together / any hosted provider, pass the
             key explicitly or set OPENAI_API_KEY in your environment.
-          - For a local vLLM endpoint, leave it as None — we fall back to
+          - For a local vLLM endpoint, leave it as None -- we fall back to
             the dummy "EMPTY" placeholder so the openai SDK doesn't object.
           - If base_url is None, we use OpenAI's default endpoint, which
             requires a real key.
