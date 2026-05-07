@@ -192,13 +192,16 @@ class NPCResponder:
         model: str = _DEFAULT_NPC_MODEL,
         seed: int = _FIXED_SEED,
         api_key: str | None = None,
+        api_key_env: str | None = None,
     ) -> None:
         """
-        api_key:
-          - If you point at OpenAI / Together / any hosted provider, pass the
-            key explicitly or set OPENAI_API_KEY in your environment.
-          - For a local vLLM endpoint, leave it as None — we fall back to
-            the dummy "EMPTY" placeholder so the openai SDK doesn't object.
+        api_key / api_key_env:
+          - Pass an explicit api_key for hosted providers (OpenAI, Together, etc.)
+          - Or pass api_key_env=NAME to read it from os.environ[NAME]
+            (e.g. "OPENROUTER_API_KEY"). Falls back to OPENAI_API_KEY for
+            backwards compatibility.
+          - For a local vLLM endpoint, leave both None — we fall back to the
+            dummy "EMPTY" placeholder so the openai SDK doesn't object.
           - If base_url is None, we use OpenAI's default endpoint, which
             requires a real key.
         """
@@ -206,6 +209,7 @@ class NPCResponder:
         self.model = model
         self.seed = seed
         self.api_key = api_key
+        self._api_key_env = api_key_env
         self._client: Any = None
 
     def _ensure_client(self) -> None:
@@ -216,13 +220,17 @@ class NPCResponder:
         except ImportError as exc:
             raise RuntimeError("openai package required: pip install openai") from exc
         import os
-        # Resolve API key: explicit > env var > "EMPTY" placeholder for local servers
-        key = self.api_key or os.environ.get("OPENAI_API_KEY") or "EMPTY"
-        if self.base_url is None:
-            # Default OpenAI endpoint
-            self._client = openai.OpenAI(api_key=key)
+        # Resolve API key: explicit > env var name > OPENAI_API_KEY > "EMPTY" placeholder
+        if self.api_key is not None:
+            key = self.api_key
+        elif self._api_key_env:
+            key = os.environ.get(self._api_key_env, "")
         else:
-            self._client = openai.OpenAI(base_url=self.base_url, api_key=key)
+            key = os.environ.get("OPENAI_API_KEY") or "EMPTY"
+        kwargs: dict[str, Any] = {"api_key": key or "EMPTY"}
+        if self.base_url:
+            kwargs["base_url"] = self.base_url
+        self._client = openai.OpenAI(**kwargs)
 
     def respond(
         self,
