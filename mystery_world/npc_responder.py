@@ -271,6 +271,13 @@ class NPCResponder:
             key = self.api_key
         elif self._api_key_env:
             key = os.environ.get(self._api_key_env, "")
+            if not key:
+                raise RuntimeError(
+                    f"NPCResponder: env var {self._api_key_env} is unset or empty. "
+                    f"Export it in the shell that launches the sweep, e.g. "
+                    f"`export {self._api_key_env}=...` "
+                    f"(this would otherwise silently fail with 401 errors written into NPC dialog)."
+                )
         else:
             key = os.environ.get("OPENAI_API_KEY") or "EMPTY"
         kwargs: dict[str, Any] = {"api_key": key or "EMPTY"}
