@@ -96,7 +96,10 @@ func _parse_port_from_args() -> int:
 
 func _process(_delta: float) -> void:
 	_frame_counter += 1
-	if _frame_counter == 1 or _frame_counter % 120 == 0:
+	# Heartbeat used to fire every 2s while idle, which spammed the
+	# console. Only emit when not connected (rare) or once at startup so
+	# the user can tell the engine is alive without ~30 lines / minute.
+	if _frame_counter == 1 or (not _connected and _frame_counter % 300 == 0):
 		printerr("[render] heartbeat frame=", _frame_counter, " connected=", _connected)
 
 	if _socket == null:
@@ -185,6 +188,12 @@ func _do_render(cmd: Dictionary) -> void:
 		var room_w: float = float(room.get("width", 1))
 		var room_h: float = float(room.get("height", 1))
 		_setup_camera(room_w * TILE_M, room_h * TILE_M)
+		# room_builder.gd attaches Label3D billboards on every object /
+		# character that spell out its name. That leaks ground truth
+		# straight into the image channel (an attentive VLM can just read
+		# "hat stand", "Alice Carter", etc.). Walk the tree we just built
+		# and strip every Label3D + Sprite3D before we render.
+		_strip_label_nodes(_builder)
 		printerr("[render] camera at ", _camera.global_position, " builder children=", _builder.get_child_count())
 	else:
 		printerr("[render] room payload empty")
@@ -260,10 +269,32 @@ func _image_is_blank(img: Image) -> bool:
 
 
 func _setup_camera(world_w: float, world_h: float) -> void:
+	# Place the camera high enough to see the whole room from a moderate
+	# 35-40 degree tilt, but low enough that the walls and props read as
+	# vertical 3D rather than the near-top-down view the prior tuning gave.
+	# The look-at is at chair height so verticals stay well composed.
 	var centre: Vector3 = Vector3(world_w / 2.0, 0.0, world_h / 2.0)
 	var diag: float = max(world_w, world_h)
-	_camera.position = centre + Vector3(0.0, diag * 1.0, diag * 0.85)
-	_camera.look_at(centre + Vector3(0.0, 0.5, 0.0), Vector3.UP)
+	_camera.position = centre + Vector3(0.0, diag * 0.55, diag * 1.05)
+	_camera.look_at(centre + Vector3(0.0, 1.0, 0.0), Vector3.UP)
+
+
+func _strip_label_nodes(root: Node) -> void:
+	# Hide (don't queue_free -- some labels are children of meshes whose
+	# transform depends on the label being present) every Label3D or
+	# Sprite3D in the subtree, plus any node whose name ends with
+	# "_label". Recursive.
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		if node is Label3D or node is Sprite3D:
+			(node as Node3D).visible = false
+			continue
+		if node.name.to_lower().ends_with("_label"):
+			if node is Node3D:
+				(node as Node3D).visible = false
+		for child in node.get_children():
+			stack.push_back(child)
 
 
 func _spawn_overlays(overlays: Array) -> void:
