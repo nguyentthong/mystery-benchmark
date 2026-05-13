@@ -31,6 +31,46 @@ class TemporalLabel(Enum):
     AMBIGUOUS = auto()       # medium+: no obvious age indicator, must ANALYZE
 
 
+class VisualState(Enum):
+    """Visual aging band for evidence rendered in the visual channel.
+
+    Unlike TemporalLabel (which is calibrated against the murder time and
+    answers "is this contact temporally relevant to the murder"), VisualState
+    is calibrated against the agent's current observation time and answers
+    "how aged does this look right now". Two observations of the same evidence
+    at different game-times can have different VisualStates — that change is
+    what carries the temporal-reasoning load in the visual benchmark.
+    """
+    BRIGHT = auto()   # young; vivid colour, wet, recently deposited
+    DULL = auto()     # mid-age; partially dried, faded
+    FADED = auto()    # old; dry crust, dim, long elapsed
+
+
+# Default thresholds in current_step units (1 step ~= 30 game-minutes by
+# default; see ComplexityConfig.step_duration_minutes). Tunable per episode
+# in later milestones.
+VISUAL_FRESH_THRESHOLD: float = 2.0
+VISUAL_STALE_THRESHOLD: float = 6.0
+
+
+def compute_visual_state(
+    age: float,
+    fresh_threshold: float = VISUAL_FRESH_THRESHOLD,
+    stale_threshold: float = VISUAL_STALE_THRESHOLD,
+) -> VisualState:
+    """Map age (game-time steps since contact_timestamp) to a visual band.
+
+    Negative ages (observation strictly before contact) are clamped to 0
+    and treated as BRIGHT; in practice this should not occur because evidence
+    only becomes observable after its contact event.
+    """
+    if age < fresh_threshold:
+        return VisualState.BRIGHT
+    if age < stale_threshold:
+        return VisualState.DULL
+    return VisualState.FADED
+
+
 @dataclass
 class EdgeRelevance:
     """Links one piece of evidence to one triangle edge with temporal metadata."""

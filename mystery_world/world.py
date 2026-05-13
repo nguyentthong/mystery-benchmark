@@ -30,8 +30,10 @@ from mystery_world.entities import (
     ScoreResult,
     TemporalLabel,
     TimelineEntry,
+    VisualState,
     WitnessStatement,
     WorldObject,
+    compute_visual_state,
 )
 from mystery_world.events import WorldEvent, process_all_events
 from mystery_world.npc_responder import NPCResponder
@@ -58,6 +60,13 @@ class ActionResult:
     success: bool = True
     observation: str = ""
     evidence_found: list[str] = field(default_factory=list)   # evidence IDs
+    # Visual-channel observation: every entry is a snapshot of one piece of
+    # evidence visible from the agent's current viewpoint after the action
+    # resolved. Each dict carries {id, name, visual_state, room_id, evidence_state}.
+    # `id` is stable across observations (persistent identity); `visual_state`
+    # is one of VisualState.{BRIGHT,DULL,FADED}.name (or None for evidence
+    # with no temporal relevance). Used by the visual-temporal benchmark.
+    visible_evidence: list[dict[str, Any]] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -301,7 +310,7 @@ class MysteryEnvironment:
             return ActionResult(success=False, observation="The case is already closed.")
         if self.budget_remaining <= 0 and action != AgentAction.ACCUSE:
             return ActionResult(success=False, observation="You have exhausted your action budget. You must ACCUSE now.")
-        
+
         result = self._dispatch_action(action, **kwargs)
 
         # Record
@@ -319,7 +328,58 @@ class MysteryEnvironment:
         new_events = process_all_events(self._state, self._rng)
         self._state.event_log.extend(new_events)
 
+        # Post-action visual-channel snapshot of the agent's current POV.
+        result.visible_evidence = self._compute_visible_evidence()
+
         return result
+
+    def get_visible_evidence(self) -> list[dict[str, Any]]:
+        """Return the visible-evidence list for the agent's current room
+        without taking an action. Use this for the initial observation before
+        any step() call (e.g. alongside render_initial_briefing)."""
+        return self._compute_visible_evidence()
+
+    def _compute_visible_evidence(self) -> list[dict[str, Any]]:
+        """Snapshot of every evidence visible from the agent's current room.
+
+        Each entry: ``{id, name, visual_state, room_id, evidence_state}``.
+
+        - ``id`` is the evidence's stable identifier, consistent across all
+          observations of the same evidence (persistent identity).
+        - ``visual_state`` is ``VisualState.{BRIGHT,DULL,FADED}.name`` derived
+          from ``age = current_step - contact_timestamp``, or ``None`` for
+          evidence with no temporal relevance.
+        - Evidence in ``HIDDEN`` or ``DESTROYED`` state is excluded.
+        - Only evidence whose host object is in the agent's current room is
+          included; off-camera evidence in other rooms is excluded.
+        """
+        loc = self.get_current_location()
+        if loc is None:
+            return []
+        observation_time = float(self._state.current_step)
+        items: list[dict[str, Any]] = []
+        for oid in loc.objects_here:
+            obj = self._state.objects.get(oid)
+            if obj is None or not obj.evidence_id:
+                continue
+            ev = self._state.evidence.get(obj.evidence_id)
+            if ev is None:
+                continue
+            if ev.state in (EvidenceState.HIDDEN, EvidenceState.DESTROYED):
+                continue
+            if ev.relevance is not None:
+                age = observation_time - ev.relevance.contact_timestamp
+                visual_state: str | None = compute_visual_state(age).name
+            else:
+                visual_state = None
+            items.append({
+                "id": ev.id,
+                "name": ev.name,
+                "visual_state": visual_state,
+                "room_id": loc.id,
+                "evidence_state": ev.state.name,
+            })
+        return items
 
     
     def _dispatch_action(self, action: AgentAction, **kwargs: Any) -> ActionResult:
