@@ -480,7 +480,7 @@ def _generate_evidence_and_objects(
     physical_alibi_templates = [
         ("coat hanging on the rack",          "A coat belonging to {name}, left here. {corr} was seen with them here at the time."),
         ("signed visitor register entry",     "The visitor register shows {name} signed in, countersigned by {corr}."),
-        ("half-finished cup of tea",          "A cup recently used by {name}. {corr} recalls sharing tea with them here."),
+        ("half-finished cup of tea",          "A cup used by {name}. {corr} recalls sharing tea with them here."),
         ("personal pocket watch left behind", "A pocket watch engraved with {name}'s initials. {corr} handed it back to them here."),
         ("reading glasses on the table",      "Reading glasses belonging to {name}. {corr} noticed them leave the glasses here."),
         ("umbrella in the stand",             "An umbrella left here by {name}. {corr} helped them stow it."),

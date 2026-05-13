@@ -186,8 +186,13 @@ class MysteryEnvironment:
     The agent interacts through ``step(action, **kwargs) -> ActionResult``.
     Observations are rendered as natural-language strings by the narrator.
     """
-    def __init__(self, world_state: WorldState):
+    def __init__(self, world_state: WorldState, visual_mode: bool = False):
         self._state = world_state
+        # Visual benchmark variant: when True, the textual channel suppresses
+        # evidence-freshness labels and the murder time-of-death, on the basis
+        # that those signals are conveyed through a visual channel (rendered
+        # observations) added in later milestones.
+        self.visual_mode: bool = visual_mode
         self._rng = np.random.default_rng(world_state.seed + 1000)   # offset for event RNG
         self.agent_location_id: str = ""
         self.agent_inventory: list[str] = []  # evidence IDs collected
@@ -342,6 +347,11 @@ class MysteryEnvironment:
         ev = self._state.evidence.get(evidence_id)
         if ev is None:
             return ActionResult(False, f"Evidence '{evidence_id}' does not exist.")
+
+        if self.visual_mode:
+            # Freshness is carried by the visual channel, not the text channel.
+            return ActionResult(True, f"You study {ev.name} closely.")
+
         if ev.relevance is None:
             return ActionResult(True, f"You analyze {ev.name}. No forensically relevant contact traces found.")
 

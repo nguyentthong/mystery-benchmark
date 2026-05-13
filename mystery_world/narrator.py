@@ -211,11 +211,17 @@ def render_initial_briefing(env: "MysteryEnvironment") -> str:
     lines = [
         _TITLES[_pick(0)],
         _CRIME_DESCRIPTIONS[_pick(1)].format(**fmt),
-        _TIME_DESCRIPTIONS[_pick(2)].format(**fmt),
+    ]
+    if not env.visual_mode:
+        lines.append(_TIME_DESCRIPTIONS[_pick(2)].format(**fmt))
+    else:
+        # When the killing happened must be inferred from visual evidence.
+        lines.append("The exact moment when the killing occurred has not been established.")
+    lines.extend([
         "",
         _SUSPECT_INTROS[_pick(3)].format(**fmt),
         "",
-    ]
+    ])
     lines.extend(_ROLE_AND_TASK[_pick(4)])
     lines.extend([
         "",
@@ -228,23 +234,28 @@ def render_initial_briefing(env: "MysteryEnvironment") -> str:
         start_clock=_start_clock,                                   
         step_min=state.config.step_duration_minutes,                
     )                       
-    lines.extend([                                                
+    analyze_help = (
+        "  ANALYZE <evidence_id>                  — study a piece of evidence in detail"
+        if env.visual_mode
+        else "  ANALYZE <evidence_id>                  — assess how fresh a piece of evidence is"
+    )
+    lines.extend([
         "",
         timing_note,
-        "",                 
+        "",
         "Available actions:",
-        "  EXAMINE_LOCATION                       — look around current room",                                         
+        "  EXAMINE_LOCATION                       — look around current room",
         "  EXAMINE_OBJECT <name>                  — inspect a specific object",
-        "  TALK_TO <name>                         — interrogate a character",  
-        "  TAKE_OBJECT <name>                     — pick up a portable object",      
-        "  CHECK_INVENTORY                        — review collected evidence",                                        
-        "  ANALYZE <evidence_id>                  — assess how fresh a piece of evidence is",                          
-        "  TRAVEL_TIME <from> <to> [at <time>]    — minimum travel time between two rooms",  
-        "  CHECK_ROUTE <from> <to> <time>         — was the direct passage open at a given time?",                     
-        "  WAIT                                   — pass time",     
+        "  TALK_TO <name>                         — interrogate a character",
+        "  TAKE_OBJECT <name>                     — pick up a portable object",
+        "  CHECK_INVENTORY                        — review collected evidence",
+        analyze_help,
+        "  TRAVEL_TIME <from> <to> [at <time>]    — minimum travel time between two rooms",
+        "  CHECK_ROUTE <from> <to> <time>         — was the direct passage open at a given time?",
+        "  WAIT                                   — pass time",
         "  ACCUSE <suspect> <weapon> <location>   — make final accusation",
-        "",                 
-    ])     
+        "",
+    ])
 
     # Current location observation
     lines.append(env.observe_location())

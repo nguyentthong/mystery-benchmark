@@ -391,7 +391,7 @@ class AssetPool:
         "paint under the left thumbnail only",
         "a distinctive scar running across the right wrist",
         "hands worn smooth by years of polishing",
-        "dark henna staining on the fingers", "fresh abrasions on the knuckles",
+        "dark henna staining on the fingers", "abrasions on the knuckles",
         "blue-black ink ground into the finger whorls",
         "a blacksmith's wide, flat thumbnails",
         "skin stretched tight over prominent hand bones",
