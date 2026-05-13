@@ -6,12 +6,18 @@ Provides:
     2. Solvability verification (sufficient evidence, breakable alibis)
     3. Human annotation export (readable case summaries for annotators)
     4. Cross-instance diversity metrics
+    5. Cross-hardware reproducibility (M10): semantic checksum + perceptual
+       hash of rendered frames, plus reference-set round-trip.
 """
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import io
 import json
 from collections import Counter
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -328,3 +334,210 @@ def compute_diversity_metrics(instances_dir: str | Path) -> dict[str, Any]:
         "location_entropy": _entropy(locations),
         "motive_entropy": _entropy(motives),
     }
+
+
+# ---------------------------------------------------------------------------
+# Cross-hardware reproducibility (M10)
+# ---------------------------------------------------------------------------
+#
+# The semantic state generated from a seed is fully deterministic and is
+# verified via a SHA-256 checksum over a canonical, sorted representation.
+# Rendered images vary slightly across GPUs / SDL versions / font hinting, so
+# they are verified via dhash (difference hash) -- a 64-bit perceptual hash
+# whose Hamming distance is small for visually-identical images and large for
+# semantically-different ones. Strict-mode runs compare against a stored
+# reference set; loose-mode runs check internal consistency within a single
+# process.
+
+
+# Bits of Hamming distance allowed between two dhashes for the images to
+# count as visually equivalent. 0-5 is a typical "near-duplicate" band; we
+# use 6 as a comfortable margin that still catches rendering regressions.
+DEFAULT_PHASH_HAMMING_THRESHOLD: int = 6
+
+
+@dataclass
+class ReferenceData:
+    """The reproducibility reference for one (seed, config) pair.
+
+    semantic_checksum is over the canonical content of the world state and
+    must match exactly across hardware. rendered_hashes is one dhash per
+    observation point along the canonical itinerary; their Hamming distance
+    to the recomputed dhashes is allowed up to a small threshold.
+    """
+    seed: int
+    config_hash: str
+    semantic_checksum: str
+    rendered_hashes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ReferenceData":
+        return cls(**d)
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2))
+
+    @classmethod
+    def load(cls, path: str | Path) -> "ReferenceData":
+        return cls.from_dict(json.loads(Path(path).read_text()))
+
+
+def semantic_checksum(state: WorldState) -> str:
+    """SHA-256 hex digest over a sorted, canonical representation of the
+    state's research-significant content. Two machines that generated the
+    same state from the same seed must agree on this value. Excludes
+    fields that are runtime-mutable (current_step, event_log, weather)."""
+    parts: list[str] = [
+        f"seed={state.seed}",
+        f"culprit={state.culprit_id}",
+        f"victim={state.victim_id}",
+        f"weapon={state.murder_weapon_id}",
+        f"location={state.murder_location_id}",
+        f"body_loc={state.body_location_id}",
+        f"murder_step={state.murder_step}",
+        f"murder_ts={state.murder_timestamp}",
+        f"fresh_thr={state.freshness_threshold}",
+        f"motive={state.motive}",
+    ]
+    # Locations: id -> name + sorted adjacency.
+    for lid in sorted(state.locations):
+        loc = state.locations[lid]
+        adj = ",".join(sorted(loc.adjacent_ids))
+        parts.append(f"loc:{lid}:{loc.name}:adj=[{adj}]:tag={loc.tag.name}")
+    # Characters: id -> name + roles + sorted alibi claims.
+    for cid in sorted(state.characters):
+        c = state.characters[cid]
+        roles = ",".join(sorted(r.name for r in c.roles))
+        alibis = "|".join(
+            f"{a.location_name}@step{a.step}:{a.clock_time_str}"
+            for a in c.alibi_claims
+        )
+        parts.append(f"char:{cid}:{c.full_name}:roles=[{roles}]:alibi=[{alibis}]")
+    # Objects: id -> name + location.
+    for oid in sorted(state.objects):
+        o = state.objects[oid]
+        parts.append(f"obj:{oid}:{o.name}:loc={o.location_id}:ev={o.evidence_id or ''}")
+    # Evidence: id -> type, state, relevance.
+    for eid in sorted(state.evidence):
+        ev = state.evidence[eid]
+        ts = ev.relevance.contact_timestamp if ev.relevance else "none"
+        label = ev.relevance.surface_label.name if ev.relevance else "none"
+        parts.append(
+            f"ev:{eid}:type={ev.evidence_type.name}:state={ev.state.name}"
+            f":linked={ev.linked_character_id or ''}:ts={ts}:label={label}"
+        )
+    # Canonical itinerary: ordered action sequence.
+    for entry in state.canonical_itinerary:
+        kw = ",".join(f"{k}={v}" for k, v in sorted(entry.get("kwargs", {}).items()))
+        parts.append(f"itin:{entry['action']}:[{kw}]")
+    blob = "\n".join(parts).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
+
+
+def config_checksum(state: WorldState) -> str:
+    """SHA-256 hex of the ComplexityConfig used to generate ``state``."""
+    blob = json.dumps(state.config.to_dict(), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
+
+
+def perceptual_hash(png_bytes: bytes) -> str:
+    """64-bit dhash (difference hash) of a PNG image, returned as a
+    16-char hex string. Two visually-identical images have Hamming
+    distance 0; small per-pixel variation typically stays within ~6 bits.
+    Uses Pillow for decode + grayscale + resize."""
+    from PIL import Image   # local import to keep verify.py import-light
+    img = Image.open(io.BytesIO(png_bytes)).convert("L").resize((9, 8))
+    pixels = list(img.getdata())
+    bits = 0
+    for row in range(8):
+        for col in range(8):
+            left = pixels[row * 9 + col]
+            right = pixels[row * 9 + col + 1]
+            bits = (bits << 1) | (1 if left > right else 0)
+    return f"{bits:016x}"
+
+
+def hamming_distance(h1: str, h2: str) -> int:
+    """Hamming distance between two hex dhash strings."""
+    return bin(int(h1, 16) ^ int(h2, 16)).count("1")
+
+
+def compute_reference(state: WorldState, render: bool = True) -> ReferenceData:
+    """Compute the reproducibility reference for a fresh state.
+
+    ``render=True`` (default) replays the canonical itinerary against a
+    deep-copied state with visual_mode=True and dhashes each
+    result.image. Set ``render=False`` to skip rendering (e.g. when
+    verifying only the semantic checksum on a machine without pygame).
+    """
+    # Local import: avoid pulling pygame into verify.py at module load.
+    from mystery_world.world import AgentAction, MysteryEnvironment
+
+    s = copy.deepcopy(state)
+    semantic = semantic_checksum(s)
+    cfg = config_checksum(s)
+
+    rendered_hashes: list[str] = []
+    if render:
+        env = MysteryEnvironment(s, visual_mode=True)
+        initial = env.get_observation_image()
+        if initial is not None:
+            rendered_hashes.append(perceptual_hash(initial))
+        for entry in s.canonical_itinerary:
+            action = AgentAction[entry["action"]]
+            if action == AgentAction.ACCUSE:
+                continue
+            result = env.step(action, **entry.get("kwargs", {}))
+            if result.image is not None:
+                rendered_hashes.append(perceptual_hash(result.image))
+    return ReferenceData(
+        seed=s.seed,
+        config_hash=cfg,
+        semantic_checksum=semantic,
+        rendered_hashes=rendered_hashes,
+    )
+
+
+def verify_against_reference(
+    state: WorldState,
+    reference: ReferenceData,
+    hamming_threshold: int = DEFAULT_PHASH_HAMMING_THRESHOLD,
+) -> dict[str, Any]:
+    """Verify ``state`` matches a stored ``reference``. The semantic
+    checksum must match exactly; rendered-frame dhashes are allowed up
+    to ``hamming_threshold`` bits of difference per frame to absorb
+    GPU/driver variation.
+    """
+    current = compute_reference(state, render=True)
+    report: dict[str, Any] = {
+        "semantic_match": current.semantic_checksum == reference.semantic_checksum,
+        "config_match": current.config_hash == reference.config_hash,
+        "n_frames_current": len(current.rendered_hashes),
+        "n_frames_reference": len(reference.rendered_hashes),
+        "frame_count_match": len(current.rendered_hashes) == len(reference.rendered_hashes),
+        "frame_hamming_distances": [],
+        "max_frame_hamming": 0,
+        "frames_within_threshold": True,
+        "hamming_threshold": hamming_threshold,
+    }
+    if not report["frame_count_match"]:
+        report["frames_within_threshold"] = False
+        return report
+    for h_cur, h_ref in zip(current.rendered_hashes, reference.rendered_hashes):
+        d = hamming_distance(h_cur, h_ref)
+        report["frame_hamming_distances"].append(d)
+        report["max_frame_hamming"] = max(report["max_frame_hamming"], d)
+        if d > hamming_threshold:
+            report["frames_within_threshold"] = False
+    return report
+
+
+def export_reference(state: WorldState, output_path: str | Path) -> ReferenceData:
+    """Compute and save a reference JSON for ``state``. Returns the
+    ReferenceData that was written."""
+    ref = compute_reference(state, render=True)
+    ref.save(output_path)
+    return ref
