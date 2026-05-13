@@ -2,45 +2,46 @@ extends Node3D
 
 # Headless one-shot Godot renderer for MysteryArena (3D variant of M3).
 #
-# Reads JSON commands from stdin (one per line) and writes line-delimited
-# responses to stdout. The Python side (mystery_world/godot_render.py) spawns
-# this scene as a subprocess and talks to it per env.step() call. The result
-# is a 3D first-person-style image of the agent's current room with
-# evidence-aging materials applied -- the visual channel of the
-# visual-temporal benchmark.
+# Used to talk to the Python side over stdin/stdout, but
+# OS.read_string_from_stdin() in Godot 4 on macOS doesn't reliably receive
+# bytes from a Python subprocess pipe -- the script reaches _ready() and
+# prints READY, but no subsequent command line ever arrives. The protocol
+# is now a localhost TCP socket: the Python side opens a listening server,
+# launches Godot with --port=N as a user arg, Godot's render.gd connects
+# back, and both sides exchange line-delimited JSON over that socket.
 #
 # Protocol
 # --------
-# stdin (line-delimited JSON):
-#   {"cmd": "render",
-#    "room": {<room dict from serialize_room>},
-#    "evidence_overlays": [
-#        {"id": "ev_123", "x": 4, "y": 7, "evidence_family": "bloodstain",
-#         "visual_state": "BRIGHT"|"DULL"|"FADED"},
-#        ...
-#    ],
-#    "width": 720, "height": 720}
-#   {"cmd": "shutdown"}
+# Python (server) listens on 127.0.0.1:<port>.
+# Godot (client) connects, then emits "READY\n" once.
+# Then a request/response loop:
+#   Python -> Godot:
+#     {"cmd": "render",
+#      "room": {<room dict from serialize_room>},
+#      "evidence_overlays": [
+#          {"id": "ev_123", "x": 4, "y": 7, "evidence_family": "bloodstain",
+#           "visual_state": "BRIGHT"|"DULL"|"FADED"},
+#          ...
+#      ],
+#      "width": 720, "height": 720}
+#     {"cmd": "shutdown"}
+#   Godot -> Python:
+#     READY                              (once, on connect)
+#     RENDER <base64-png>                (per render command)
+#     ERR <message>                      (on bad input)
 #
-# stdout (one ASCII line per response, never binary):
-#   READY                              -- printed once after _ready
-#   RENDER <base64-png>                -- response to a render command
-#   ERR <message>                      -- if the command was malformed
-#
-# All other diagnostics (Godot's own logs) go to stderr so the stdout
-# channel stays a clean text protocol.
+# All diagnostic output goes through printerr -> the socket isn't used for
+# Godot's own debug log; that stays on stderr and is drained by the
+# Python side's _drain_stderr thread.
 
-const TILE_M: float = 1.0   # 1 tile = 1 metre. Matches main.gd's TILE_M.
+const TILE_M: float = 1.0   # 1 tile = 1 metre.
 
 const AGING_COLOR_BY_STATE: Dictionary = {
-	"BRIGHT": Color(0.84, 0.15, 0.15),  # vivid wet red
-	"DULL":   Color(0.55, 0.18, 0.12),  # dark dried red
-	"FADED":  Color(0.32, 0.22, 0.18),  # brown crust
+	"BRIGHT": Color(0.84, 0.15, 0.15),
+	"DULL":   Color(0.55, 0.18, 0.12),
+	"FADED":  Color(0.32, 0.22, 0.18),
 }
 
-# Per-family rendering of the aging trace. "disc" = flat coloured disc on the
-# floor (bloodstains, footprints). "cylinder" = vertical mesh that shrinks
-# with age (candles, melted-things). Default is "disc".
 const FAMILY_AGING_MESH: Dictionary = {
 	"bloodstain": "disc",
 	"blood":      "disc",
@@ -55,65 +56,91 @@ const FAMILY_AGING_MESH: Dictionary = {
 @onready var _builder:  Node3D      = $RenderViewport/RoomMount
 @onready var _overlays: Node3D      = $RenderViewport/EvidenceOverlays
 
-var _stdin_thread: Thread = null
-var _command_queue: Array = []
-var _command_mutex: Mutex = Mutex.new()
-var _shutdown_flag: bool = false
-var _stdin_buffer: String = ""
+var _socket: StreamPeerTCP = null
+var _connected: bool = false
+var _recv_buffer: String = ""
+var _frame_counter: int = 0
 
 
 func _ready() -> void:
-	# Belt and braces against the "SubViewport renders black" quirk:
-	# (1) make the camera explicitly current within the SubViewport's own
-	#     World3D, (2) attach the WorldEnv's Environment resource to the
-	#     Camera as a fallback so the background colour applies even if
-	#     own_world_3d swallows the WorldEnvironment node, (3) keep
-	#     update_mode = ALWAYS so the SubViewport always renders, and
-	#     additionally request UPDATE_ONCE before each capture below.
 	_camera.current = true
 	if _world_env and _world_env.environment:
 		_camera.environment = _world_env.environment
 
-	print("READY")
-	# Background thread reads stdin so _process can pull commands without
-	# blocking the main render thread on OS.read_string_from_stdin.
-	_stdin_thread = Thread.new()
-	_stdin_thread.start(_stdin_loop)
+	var port: int = _parse_port_from_args()
+	if port <= 0:
+		printerr("[render] FATAL: no --port=N argument supplied.")
+		printerr("[render] cmdline_args=", OS.get_cmdline_args())
+		printerr("[render] cmdline_user_args=", OS.get_cmdline_user_args())
+		get_tree().quit(1)
+		return
+
+	printerr("[render] connecting to 127.0.0.1:", port)
+	_socket = StreamPeerTCP.new()
+	var err: int = _socket.connect_to_host("127.0.0.1", port)
+	if err != OK:
+		printerr("[render] connect_to_host error=", err)
+		get_tree().quit(1)
+		return
 
 
-func _stdin_loop() -> void:
-	# Godot 4 read_string_from_stdin reads up to a fixed buffer size, NOT a
-	# whole line, so we accumulate chunks and split on newlines ourselves.
-	# Otherwise JSON payloads larger than the buffer get truncated and the
-	# parser sees a fragment.
-	while not _shutdown_flag:
-		var chunk: String = OS.read_string_from_stdin()
-		if chunk.length() == 0:
-			OS.delay_msec(5)
-			continue
-		_stdin_buffer += chunk
-		while true:
-			var nl_pos: int = _stdin_buffer.find("\n")
-			if nl_pos == -1:
-				break
-			var line: String = _stdin_buffer.substr(0, nl_pos).strip_edges()
-			_stdin_buffer = _stdin_buffer.substr(nl_pos + 1)
-			if line.length() == 0:
-				continue
-			_command_mutex.lock()
-			_command_queue.push_back(line)
-			_command_mutex.unlock()
+func _parse_port_from_args() -> int:
+	for arg in OS.get_cmdline_user_args():
+		if str(arg).begins_with("--port="):
+			return int(str(arg).substr("--port=".length()))
+	for arg in OS.get_cmdline_args():
+		if str(arg).begins_with("--port="):
+			return int(str(arg).substr("--port=".length()))
+	return -1
 
 
 func _process(_delta: float) -> void:
-	var pending: Array = []
-	_command_mutex.lock()
-	if _command_queue.size() > 0:
-		pending = _command_queue
-		_command_queue = []
-	_command_mutex.unlock()
-	for raw in pending:
-		await _handle_command(raw)
+	_frame_counter += 1
+	if _frame_counter == 1 or _frame_counter % 120 == 0:
+		printerr("[render] heartbeat frame=", _frame_counter, " connected=", _connected)
+
+	if _socket == null:
+		return
+	_socket.poll()
+	var status: int = _socket.get_status()
+
+	if not _connected:
+		if status == StreamPeerTCP.STATUS_CONNECTED:
+			_connected = true
+			_send_line("READY")
+			printerr("[render] connected, sent READY")
+		elif status == StreamPeerTCP.STATUS_ERROR:
+			printerr("[render] connection error -- Godot couldn't reach the Python server")
+			get_tree().quit(1)
+		return
+
+	if status != StreamPeerTCP.STATUS_CONNECTED:
+		printerr("[render] socket dropped (status=", status, "); shutting down")
+		get_tree().quit(0)
+		return
+
+	# Pull any available bytes off the socket into our line buffer, then
+	# process complete lines one at a time.
+	var available: int = _socket.get_available_bytes()
+	if available > 0:
+		var raw: String = _socket.get_utf8_string(available)
+		_recv_buffer += raw
+		while true:
+			var nl_pos: int = _recv_buffer.find("\n")
+			if nl_pos == -1:
+				break
+			var line: String = _recv_buffer.substr(0, nl_pos).strip_edges()
+			_recv_buffer = _recv_buffer.substr(nl_pos + 1)
+			if line.length() == 0:
+				continue
+			await _handle_command(line)
+
+
+func _send_line(s: String) -> void:
+	if _socket == null:
+		return
+	var data: PackedByteArray = (s + "\n").to_utf8_buffer()
+	_socket.put_data(data)
 
 
 func _handle_command(raw: String) -> void:
@@ -121,17 +148,16 @@ func _handle_command(raw: String) -> void:
 	var parsed = JSON.parse_string(raw)
 	if parsed == null or typeof(parsed) != TYPE_DICTIONARY:
 		printerr("[render] bad JSON (len=", raw.length(), ", head=", raw.substr(0, 120), ")")
-		print("ERR bad_json")
+		_send_line("ERR bad_json")
 		return
 	var cmd: String = String(parsed.get("cmd", ""))
 	printerr("[render] cmd=", cmd)
 	if cmd == "render":
 		await _do_render(parsed)
 	elif cmd == "shutdown":
-		_shutdown_flag = true
-		get_tree().quit()
+		get_tree().quit(0)
 	else:
-		print("ERR unknown_command:", cmd)
+		_send_line("ERR unknown_command:" + cmd)
 
 
 func _do_render(cmd: Dictionary) -> void:
@@ -144,7 +170,6 @@ func _do_render(cmd: Dictionary) -> void:
 	_viewport.size = Vector2i(width, height)
 	printerr("[render] viewport sized to ", _viewport.size)
 
-	# Tear down the previous frame's scene contents.
 	for child in _builder.get_children():
 		_builder.remove_child(child)
 		child.queue_free()
@@ -167,11 +192,8 @@ func _do_render(cmd: Dictionary) -> void:
 	_spawn_overlays(overlays)
 	printerr("[render] spawned ", _overlays.get_child_count(), " overlays")
 
-	# Force the SubViewport to render now. We try the frame_post_draw signal
-	# pattern first; if it doesn't fire within a couple of process_frame
-	# yields we just sample whatever is in the texture anyway. Awaiting
-	# frame_post_draw from inside _process can deadlock if the engine isn't
-	# actively running a render pass, so the fallback is critical.
+	# Force a fresh draw, then wait a couple of process_frames for the GPU
+	# to actually emit pixels into the SubViewport texture.
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -181,12 +203,12 @@ func _do_render(cmd: Dictionary) -> void:
 	var tex := _viewport.get_texture()
 	if tex == null:
 		printerr("[render] null texture")
-		print("ERR null_texture")
+		_send_line("ERR null_texture")
 		return
 	var img: Image = tex.get_image()
 	if img == null:
 		printerr("[render] null image")
-		print("ERR null_image")
+		_send_line("ERR null_image")
 		return
 
 	_dump_diagnostics(img)
@@ -194,13 +216,10 @@ func _do_render(cmd: Dictionary) -> void:
 	var png_bytes: PackedByteArray = img.save_png_to_buffer()
 	var b64: String = Marshalls.raw_to_base64(png_bytes)
 	printerr("[render] emitting RENDER (b64 len=", b64.length(), ")")
-	print("RENDER ", b64)
+	_send_line("RENDER " + b64)
 
 
 func _dump_diagnostics(img: Image) -> void:
-	# printerr writes directly to stderr (bypasses Godot's warning routing,
-	# which we suspected was being swallowed). Helps diagnose black-image
-	# issues without depending on push_warning behaviour.
 	var n_objects := _builder.get_child_count()
 	var n_overlays := _overlays.get_child_count()
 	var vp_size := _viewport.size
@@ -226,8 +245,6 @@ func _dump_diagnostics(img: Image) -> void:
 
 
 func _image_is_blank(img: Image) -> bool:
-	# Probe a handful of pixels; if all are zero (or alpha-only), the
-	# viewport almost certainly never rendered.
 	if img.get_width() < 2 or img.get_height() < 2:
 		return false
 	var samples: Array = [
@@ -243,9 +260,6 @@ func _image_is_blank(img: Image) -> bool:
 
 
 func _setup_camera(world_w: float, world_h: float) -> void:
-	# Fixed third-person camera framing the entire room from above-and-back at
-	# ~45deg. Wider rooms get pulled further out. The look-at target sits at
-	# y=0.5 (chair height) so the scene's verticals are well composed.
 	var centre: Vector3 = Vector3(world_w / 2.0, 0.0, world_h / 2.0)
 	var diag: float = max(world_w, world_h)
 	_camera.position = centre + Vector3(0.0, diag * 1.0, diag * 0.85)
@@ -258,7 +272,7 @@ func _spawn_overlays(overlays: Array) -> void:
 		var state: String = String(ov.get("visual_state", "BRIGHT"))
 		var color: Color = AGING_COLOR_BY_STATE.get(state, Color(0.5, 0.5, 0.5))
 		var x: float = float(ov.get("x", 0)) + 0.5
-		var z: float = float(ov.get("y", 0)) + 0.5  # tile y maps to world z
+		var z: float = float(ov.get("y", 0)) + 0.5
 		var kind: String = FAMILY_AGING_MESH.get(family, "disc")
 
 		var node: Node3D = _make_overlay_mesh(kind, color, state)
@@ -269,7 +283,6 @@ func _spawn_overlays(overlays: Array) -> void:
 func _make_overlay_mesh(kind: String, color: Color, state: String) -> Node3D:
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
 	mat.albedo_color = color
-	# Wet/bright stays glossy; dried/faded gets rougher.
 	mat.roughness = 0.35 if state == "BRIGHT" else (0.7 if state == "DULL" else 0.9)
 	mat.metallic = 0.0
 
@@ -284,7 +297,6 @@ func _make_overlay_mesh(kind: String, color: Color, state: String) -> Node3D:
 		mi.position = Vector3(0.0, cyl.height / 2.0, 0.0)
 		mi.material_override = mat
 	else:
-		# "disc" -- a flattened cylinder pretending to be a floor decal.
 		var disc: CylinderMesh = CylinderMesh.new()
 		disc.top_radius = 0.28
 		disc.bottom_radius = 0.28

@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -294,21 +295,37 @@ class GodotRenderer:
         self.height = height
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
+        # TCP transport (replaces stdin/stdout; the latter is unreliable on
+        # macOS when launching a windowed .app via subprocess).
+        self._server_sock: socket.socket | None = None
+        self._conn: socket.socket | None = None
+        self._conn_reader = None     # file-like wrapper around self._conn for line-buffered read
+        self._conn_writer = None     # file-like wrapper around self._conn for writes
         self._launch(ready_timeout_sec)
 
     def _launch(self, ready_timeout_sec: float) -> None:
+        # 1. Bring up a TCP server on a random localhost port.
+        self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._server_sock.bind(("127.0.0.1", 0))
+        self._server_sock.listen(1)
+        port: int = self._server_sock.getsockname()[1]
+
+        # 2. Launch Godot, passing --port=N after the `--` separator so
+        # Godot routes it into OS.get_cmdline_user_args().
         cmd = [
             self.godot_bin,
             "--path", str(self.project_path),
             "res://scenes/render.tscn",
+            "--",
+            f"--port={port}",
         ]
         try:
             self._proc = subprocess.Popen(
                 cmd,
-                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                bufsize=1,                # line-buffered
+                bufsize=1,
                 text=True,
             )
         except FileNotFoundError as exc:
@@ -319,38 +336,45 @@ class GodotRenderer:
             ) from exc
         atexit.register(self.close)
 
-        # Start a daemon thread that drains stderr so Godot doesn't eventually
-        # block on a full stderr buffer mid-run. Lines come back through the
-        # Python logger at INFO so push_error / bad-JSON diagnostics are
-        # visible without dumping to the terminal directly.
+        # 3. Drain Godot's stderr in the background. printerr lines from
+        # render.gd surface here so we can see what the child is doing.
         self._stderr_thread = threading.Thread(
             target=self._drain_stderr, daemon=True
         )
         self._stderr_thread.start()
-
-        # Wait for READY.
-        import time
-        deadline = time.monotonic() + ready_timeout_sec
-        while time.monotonic() < deadline:
-            line = self._proc.stdout.readline() if self._proc.stdout else ""
-            if not line:
-                if self._proc.poll() is not None:
-                    raise GodotRendererError(
-                        "Godot subprocess exited before READY (see godot stderr above)."
-                    )
-                continue
-            if line.strip() == self.READY_TOKEN:
-                return
-            # Anything else is diagnostic noise; relay to logger.
-            logger.debug("godot[startup]: %s", line.rstrip())
-        raise GodotRendererError(
-            f"Godot did not emit READY within {ready_timeout_sec}s"
+        # Also drain stdout (Godot's own engine logs go there).
+        self._stdout_thread = threading.Thread(
+            target=self._drain_stdout, daemon=True
         )
+        self._stdout_thread.start()
+
+        # 4. Accept the connection back from Godot (timeout if Godot never
+        # connects -- means render.gd never reached _ready, or the binary
+        # crashed at startup).
+        self._server_sock.settimeout(ready_timeout_sec)
+        try:
+            self._conn, _addr = self._server_sock.accept()
+        except socket.timeout as exc:
+            raise GodotRendererError(
+                f"Godot did not connect back to the Python server within "
+                f"{ready_timeout_sec}s. Check stderr for crash messages."
+            ) from exc
+        self._conn.settimeout(None)
+        # Wrap for line-delimited I/O.
+        self._conn_reader = self._conn.makefile("r", encoding="utf-8", newline="\n")
+        self._conn_writer = self._conn.makefile("w", encoding="utf-8", newline="\n")
+
+        # 5. Wait for READY line.
+        line = self._conn_reader.readline().rstrip("\n")
+        if line.strip() != self.READY_TOKEN:
+            raise GodotRendererError(
+                f"Expected {self.READY_TOKEN!r} from Godot, got: {line!r}"
+            )
 
     def _drain_stderr(self) -> None:
-        """Background thread: read Godot's stderr line by line and forward
-        each line to the Python logger at WARNING. Prevents the stderr
-        buffer from filling up and blocking the Godot process."""
+        """Background thread: surface Godot's stderr through the Python
+        logger at WARNING so push_error / printerr diagnostics are
+        visible during development."""
         if self._proc is None or self._proc.stderr is None:
             return
         try:
@@ -361,20 +385,31 @@ class GodotRenderer:
         except Exception:   # pragma: no cover -- thread teardown
             pass
 
+    def _drain_stdout(self) -> None:
+        """Background thread: drain Godot's stdout. Engine boot messages
+        and any stray print()s land here. We log at DEBUG so they don't
+        spam normal runs."""
+        if self._proc is None or self._proc.stdout is None:
+            return
+        try:
+            for line in iter(self._proc.stdout.readline, ""):
+                if not line:
+                    break
+                logger.debug("godot[stdout]: %s", line.rstrip())
+        except Exception:   # pragma: no cover
+            pass
+
     def render(
         self,
         room_payload: dict[str, Any],
         width: int | None = None,
         height: int | None = None,
     ) -> bytes:
-        """Send one render command and return PNG bytes.
-
-        ``room_payload`` is the dict from ``_serialize_room``; it must include
-        ``evidence_overlays``. The render command is one line of JSON on
-        stdin; the response is ``RENDER <base64-png>`` on stdout.
-        """
+        """Send one render command over the TCP socket and return PNG bytes."""
         if self._proc is None or self._proc.poll() is not None:
             raise GodotRendererError("Godot subprocess is not running.")
+        if self._conn_reader is None or self._conn_writer is None:
+            raise GodotRendererError("Godot socket is not connected.")
         overlays = room_payload.pop("evidence_overlays", [])
         cmd_dict = {
             "cmd": "render",
@@ -383,21 +418,17 @@ class GodotRenderer:
             "width": width or self.width,
             "height": height or self.height,
         }
-        # Put overlays back so the caller's payload is unmodified.
         room_payload["evidence_overlays"] = overlays
 
         line = json.dumps(cmd_dict) + "\n"
         with self._lock:
-            assert self._proc.stdin is not None
-            assert self._proc.stdout is not None
-            self._proc.stdin.write(line)
-            self._proc.stdin.flush()
+            self._conn_writer.write(line)
+            self._conn_writer.flush()
 
-            # Read response lines until we see a RENDER or ERR.
             while True:
-                resp = self._proc.stdout.readline()
+                resp = self._conn_reader.readline()
                 if not resp:
-                    raise GodotRendererError("Godot subprocess closed stdout.")
+                    raise GodotRendererError("Godot closed the socket mid-render.")
                 resp = resp.rstrip("\n")
                 if resp.startswith(self.RENDER_TOKEN):
                     b64 = resp[len(self.RENDER_TOKEN):]
@@ -407,20 +438,38 @@ class GodotRenderer:
                 logger.debug("godot: %s", resp)
 
     def close(self) -> None:
-        if self._proc is None:
+        if self._proc is None and self._conn is None and self._server_sock is None:
             return
         with self._lock:
+            # Send shutdown over the socket if we still have one.
             try:
-                if self._proc.stdin and not self._proc.stdin.closed:
-                    self._proc.stdin.write(json.dumps({"cmd": "shutdown"}) + "\n")
-                    self._proc.stdin.flush()
-            except (BrokenPipeError, OSError):
+                if self._conn_writer is not None:
+                    self._conn_writer.write(json.dumps({"cmd": "shutdown"}) + "\n")
+                    self._conn_writer.flush()
+            except (BrokenPipeError, OSError, ValueError):
                 pass
-            try:
-                self._proc.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                self._proc.kill()
-            self._proc = None
+            for fh in (self._conn_reader, self._conn_writer):
+                try:
+                    if fh is not None:
+                        fh.close()
+                except Exception:
+                    pass
+            for sk in (self._conn, self._server_sock):
+                try:
+                    if sk is not None:
+                        sk.close()
+                except Exception:
+                    pass
+            self._conn_reader = None
+            self._conn_writer = None
+            self._conn = None
+            self._server_sock = None
+            if self._proc is not None:
+                try:
+                    self._proc.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    self._proc.kill()
+                self._proc = None
 
 
 def _default_project_path() -> Path:
