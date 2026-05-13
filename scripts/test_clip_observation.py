@@ -36,7 +36,6 @@ from mystery_world.entities import (
     compute_visual_state,
 )
 from mystery_world.generator import generate_mystery
-from mystery_world.renderer import render_observation_png
 from mystery_world.world import AgentAction, MysteryEnvironment
 
 
@@ -115,8 +114,11 @@ def _check_last_frame_matches_image(seeds: list[int]) -> bool:
             print(f"FAIL [last_frame_matches]: seed={seed} no frames")
             return False
         # By construction, the last frame is rendered at game_time = current_step,
-        # which is the same as the single-image observation.
-        single = render_observation_png(env)
+        # which is the same as the single-image observation. Route the
+        # independent check through env._render_observation_image so we
+        # compare against whichever backend (pygame / godot / mock) the
+        # env is actually using.
+        single = env._render_observation_image()
         if result.frames[-1] != single:
             print(f"FAIL [last_frame_matches]: seed={seed} frames[-1] != independent render")
             return False

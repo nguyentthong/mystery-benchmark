@@ -9,6 +9,7 @@ and accepts *actions*.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -388,15 +389,24 @@ class MysteryEnvironment:
 
     def _render_observation_image(self) -> bytes | None:
         """Render the current observation as PNG bytes, or return None when
-        the visual channel is disabled. Imported lazily to avoid the
-        renderer's pygame dependency at module load."""
+        the visual channel is disabled.
+
+        Backend selection (lazy-imported):
+          - MYSTERYARENA_RENDERER=pygame -- the 2D top-down pygame renderer
+            (the M3 implementation; left in place for tests and as a fallback).
+          - default / MYSTERYARENA_RENDERER=godot -- the 3D Godot subprocess
+            renderer (M3/M4/M9 3D variant). Falls back to MockGodotRenderer
+            if no Godot binary is on PATH or MYSTERYARENA_GODOT=mock is set.
+        """
         if not self.visual_mode:
             return None
-        # Lazy import avoids a circular dependency: renderer imports
-        # MysteryEnvironment for type hints, and would otherwise pull pygame
-        # into every text-only run.
-        from mystery_world.renderer import render_observation_png
-        return render_observation_png(self)
+        backend = os.environ.get("MYSTERYARENA_RENDERER", "godot").lower()
+        if backend == "pygame":
+            from mystery_world.renderer import render_observation_png
+            return render_observation_png(self)
+        # Default: Godot 3D path.
+        from mystery_world.godot_render import render_observation_png_3d
+        return render_observation_png_3d(self)
 
     def _render_observation_clip(self, action: "AgentAction") -> list[bytes]:
         """Render an N-frame clip per ``clip_dispatch[action]``. Empty list
@@ -412,8 +422,12 @@ class MysteryEnvironment:
         if n_frames == 1:
             img = self._render_observation_image()
             return [img] if img is not None else []
-        from mystery_world.renderer import render_observation_clip
-        return render_observation_clip(self, n_frames=n_frames)
+        backend = os.environ.get("MYSTERYARENA_RENDERER", "godot").lower()
+        if backend == "pygame":
+            from mystery_world.renderer import render_observation_clip
+            return render_observation_clip(self, n_frames=n_frames)
+        from mystery_world.godot_render import render_observation_clip_3d
+        return render_observation_clip_3d(self, n_frames=n_frames)
 
     def _compute_visible_evidence(
         self, at_game_time: float | None = None
