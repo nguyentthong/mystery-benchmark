@@ -443,7 +443,12 @@ def _detect_godot_app() -> str | None:
     """
     candidates: list[Path] = []
     if sys.platform == "darwin":
-        app_dirs = [Path("/Applications"), Path.home() / "Applications"]
+        app_dirs = [
+            Path("/Applications"),
+            Path.home() / "Applications",
+            Path.home() / "Downloads",   # many users leave the .app here
+            Path.home() / "Desktop",
+        ]
         for app_dir in app_dirs:
             if not app_dir.exists():
                 continue
