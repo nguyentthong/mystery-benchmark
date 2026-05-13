@@ -166,6 +166,7 @@ def render_observation_image(
     env: MysteryEnvironment,
     sprites: SpriteLoader | None = None,
     tile_px: int = OBS_TILE_PX,
+    at_game_time: float | None = None,
 ) -> np.ndarray:
     """Render the agent's current room as an (H, W, 3) uint8 numpy array.
 
@@ -224,8 +225,9 @@ def render_observation_image(
     # visible piece of evidence, placed on its host object, hue determined by
     # the evidence's VisualState. Same persistent evidence at a different
     # current_step renders a different colour, which is the visual carrier of
-    # change across observations.
-    _draw_aging_overlays(env, layout, surface, tile_px)
+    # change across observations. ``at_game_time`` (M9) lets a clip render
+    # sub-step instants by overriding the aging-computation game-time.
+    _draw_aging_overlays(env, layout, surface, tile_px, at_game_time=at_game_time)
 
     # Convert to numpy (H, W, 3) uint8 RGB
     raw = pygame.surfarray.array3d(surface)
@@ -238,10 +240,14 @@ def _draw_aging_overlays(
     layout: RoomLayout,
     surface: pygame.Surface,
     tile_px: int,
+    at_game_time: float | None = None,
 ) -> None:
     """Draw the VisualState-coloured trace overlay on top of each visible
     evidence's host object. Reads env.get_visible_evidence() so the env stays
-    the single source of truth about what's visible and at what band."""
+    the single source of truth about what's visible and at what band.
+
+    ``at_game_time`` overrides the aging-computation game-time, used by M9's
+    clip renderer to render frames at sub-step instants."""
     # Build a quick lookup from evidence_id to host object's tile position.
     host_pos: dict[str, tuple[int, int]] = {}
     for oid, pos in layout.objects.items():
@@ -250,7 +256,7 @@ def _draw_aging_overlays(
             host_pos[obj.evidence_id] = pos
 
     radius = max(4, tile_px // 4)
-    for entry in env.get_visible_evidence():
+    for entry in env.get_visible_evidence(at_game_time=at_game_time):
         vs_name = entry.get("visual_state")
         if vs_name is None:
             continue   # non-temporal evidence (no contact_timestamp); not aged
@@ -269,7 +275,9 @@ def _draw_aging_overlays(
 
 def render_observation_png(env: MysteryEnvironment, **kwargs) -> bytes:
     """Same as `render_observation_image` but returns PNG-encoded bytes,
-    suitable for direct upload to multimodal APIs."""
+    suitable for direct upload to multimodal APIs.
+
+    Accepts ``at_game_time`` to render at a sub-step instant (M9 clips)."""
     arr = render_observation_image(env, **kwargs)
     try:
         from PIL import Image
@@ -290,3 +298,36 @@ def render_observation_pil(env: MysteryEnvironment, **kwargs) -> "PILImage.Image
     except ImportError as e:
         raise ImportError("PIL/Pillow required. `uv add pillow`") from e
     return Image.fromarray(arr)
+
+
+def render_observation_clip(
+    env: MysteryEnvironment,
+    n_frames: int,
+    span_start_game_time: float | None = None,
+    span_end_game_time: float | None = None,
+    **kwargs,
+) -> list[bytes]:
+    """Render N frames of PNG bytes at evenly-spaced game-time offsets
+    within ``[span_start, span_end]`` (exclusive of start, inclusive of end).
+
+    Defaults: ``span_start = current_step - 1`` and ``span_end = current_step``
+    so the clip covers the duration of the step that just completed. The
+    last frame matches ``render_observation_png(env)``.
+
+    ``n_frames=1`` returns a single-element list equivalent to the
+    single-image observation. Used by M9's per-action clip dispatch.
+    """
+    if n_frames <= 0:
+        return []
+    end = float(env.state.current_step) if span_end_game_time is None else float(span_end_game_time)
+    start = (end - 1.0) if span_start_game_time is None else float(span_start_game_time)
+    span = end - start
+    frames: list[bytes] = []
+    for i in range(n_frames):
+        # (i+1)/N puts the last frame exactly at `end`; frame 1 sits at
+        # start + span/N (excludes start so we always advance from the
+        # action's pre-state).
+        offset = (i + 1) / n_frames
+        gt = start + offset * span
+        frames.append(render_observation_png(env, at_game_time=gt, **kwargs))
+    return frames

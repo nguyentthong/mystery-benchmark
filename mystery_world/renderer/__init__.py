@@ -17,6 +17,7 @@ The renderer is fully deterministic given
 """
 from mystery_world.renderer.layout import RoomLayout, Tile, build_room_layout
 from mystery_world.renderer.observation import (
+    render_observation_clip,
     render_observation_image,
     render_observation_pil,
     render_observation_png,
@@ -32,6 +33,7 @@ __all__ = [
     "RoomLayout",
     "Tile",
     "build_room_layout",
+    "render_observation_clip",
     "render_observation_image",
     "render_observation_png",
     "render_observation_pil",

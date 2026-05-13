@@ -72,6 +72,11 @@ class ActionResult:
     # text-only runs pay no rendering cost). Deterministic given
     # (seed, action_history).
     image: bytes | None = None
+    # M9: N-frame clip when the env's clip_dispatch maps the action to N>1.
+    # frames[-1] is identical to `image` when both are populated. When
+    # visual_mode is off, this is an empty list. When the action's dispatched
+    # N is 1 (the default), this is a single-element list containing `image`.
+    frames: list[bytes] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -211,13 +216,23 @@ class MysteryEnvironment:
     The agent interacts through ``step(action, **kwargs) -> ActionResult``.
     Observations are rendered as natural-language strings by the narrator.
     """
-    def __init__(self, world_state: WorldState, visual_mode: bool = False):
+    def __init__(
+        self,
+        world_state: WorldState,
+        visual_mode: bool = False,
+        clip_dispatch: dict["AgentAction", int] | None = None,
+    ):
         self._state = world_state
         # Visual benchmark variant: when True, the textual channel suppresses
         # evidence-freshness labels and the murder time-of-death, on the basis
         # that those signals are conveyed through a visual channel (rendered
         # observations) added in later milestones.
         self.visual_mode: bool = visual_mode
+        # M9: per-action frame-count dispatch. When an action's value is N>1,
+        # step() returns an N-frame clip in result.frames (rendered at
+        # sub-step game-time offsets within the just-completed step).
+        # Missing actions and N=1 produce the single-image behaviour.
+        self.clip_dispatch: dict["AgentAction", int] = dict(clip_dispatch) if clip_dispatch else {}
         self._rng = np.random.default_rng(world_state.seed + 1000)   # offset for event RNG
         self.agent_location_id: str = ""
         self.agent_inventory: list[str] = []  # evidence IDs collected
@@ -347,14 +362,23 @@ class MysteryEnvironment:
         # Post-action visual-channel snapshot of the agent's current POV.
         result.visible_evidence = self._compute_visible_evidence()
         result.image = self._render_observation_image()
+        # M9: optional N-frame clip. result.frames[-1] is the same as
+        # result.image when both are populated, so consumers that read
+        # only `image` continue to work.
+        result.frames = self._render_observation_clip(action)
 
         return result
 
-    def get_visible_evidence(self) -> list[dict[str, Any]]:
+    def get_visible_evidence(
+        self, at_game_time: float | None = None
+    ) -> list[dict[str, Any]]:
         """Return the visible-evidence list for the agent's current room
         without taking an action. Use this for the initial observation before
-        any step() call (e.g. alongside render_initial_briefing)."""
-        return self._compute_visible_evidence()
+        any step() call (e.g. alongside render_initial_briefing).
+
+        ``at_game_time`` overrides the current step for aging computation;
+        defaults to the integer ``current_step``."""
+        return self._compute_visible_evidence(at_game_time=at_game_time)
 
     def get_observation_image(self) -> bytes | None:
         """Return the PNG-encoded rendering of the agent's current room, or
@@ -374,7 +398,26 @@ class MysteryEnvironment:
         from mystery_world.renderer import render_observation_png
         return render_observation_png(self)
 
-    def _compute_visible_evidence(self) -> list[dict[str, Any]]:
+    def _render_observation_clip(self, action: "AgentAction") -> list[bytes]:
+        """Render an N-frame clip per ``clip_dispatch[action]``. Empty list
+        when visual_mode is off; single-frame list when N is 1 or unset
+        (so the clip default is consistent with the single-image
+        observation). Last frame is at ``current_step`` and so matches the
+        single-image render exactly."""
+        if not self.visual_mode:
+            return []
+        n_frames = self.clip_dispatch.get(action, 1)
+        if n_frames < 1:
+            return []
+        if n_frames == 1:
+            img = self._render_observation_image()
+            return [img] if img is not None else []
+        from mystery_world.renderer import render_observation_clip
+        return render_observation_clip(self, n_frames=n_frames)
+
+    def _compute_visible_evidence(
+        self, at_game_time: float | None = None
+    ) -> list[dict[str, Any]]:
         """Snapshot of every evidence visible from the agent's current room.
 
         Each entry: ``{id, name, visual_state, room_id, evidence_state}``.
@@ -387,11 +430,17 @@ class MysteryEnvironment:
         - Evidence in ``HIDDEN`` or ``DESTROYED`` state is excluded.
         - Only evidence whose host object is in the agent's current room is
           included; off-camera evidence in other rooms is excluded.
+
+        ``at_game_time`` overrides the current step for aging computation,
+        used by M9's clip renderer to capture frames at sub-step offsets.
+        Defaults to the integer ``current_step``.
         """
         loc = self.get_current_location()
         if loc is None:
             return []
-        observation_time = float(self._state.current_step)
+        observation_time = (
+            float(self._state.current_step) if at_game_time is None else float(at_game_time)
+        )
         items: list[dict[str, Any]] = []
         for oid in loc.objects_here:
             obj = self._state.objects.get(oid)
