@@ -282,7 +282,14 @@ class GodotRenderer:
         ready_timeout_sec: float = 30.0,
     ) -> None:
         self.project_path = Path(project_path) if project_path else _default_project_path()
-        self.godot_bin = godot_bin or os.environ.get("GODOT_BIN") or shutil.which("godot") or "godot"
+        self.godot_bin = (
+            godot_bin
+            or os.environ.get("GODOT_BIN")
+            or shutil.which("godot")
+            or shutil.which("godot4")
+            or _detect_godot_app()
+            or "godot"
+        )
         self.width = width
         self.height = height
         self._proc: subprocess.Popen | None = None
@@ -419,6 +426,48 @@ class GodotRenderer:
 def _default_project_path() -> Path:
     """Return the path to the bundled game/ project directory."""
     return Path(__file__).resolve().parent.parent / "game"
+
+
+def _detect_godot_app() -> str | None:
+    """Best-effort search for a Godot binary in OS-typical install locations.
+
+    macOS: Godot ships as ``Godot.app`` with the binary at
+    ``Contents/MacOS/Godot``; users often double-click to install rather than
+    putting it on PATH. We look in /Applications and ~/Applications, and
+    accept any version-suffixed app bundle like ``Godot_v4.3-stable.app``.
+
+    Linux: many users keep Godot under ~/ as a downloaded binary. We probe
+    ~/Godot, ~/godot, and ~/bin/godot.
+
+    Returns the first existing path or None.
+    """
+    candidates: list[Path] = []
+    if sys.platform == "darwin":
+        app_dirs = [Path("/Applications"), Path.home() / "Applications"]
+        for app_dir in app_dirs:
+            if not app_dir.exists():
+                continue
+            # Plain Godot.app
+            plain = app_dir / "Godot.app" / "Contents" / "MacOS" / "Godot"
+            candidates.append(plain)
+            # Version-suffixed bundles, e.g. Godot_v4.3-stable_macos.universal.app
+            try:
+                for entry in app_dir.iterdir():
+                    if entry.is_dir() and entry.suffix == ".app" and entry.name.lower().startswith("godot"):
+                        candidates.append(entry / "Contents" / "MacOS" / "Godot")
+            except (PermissionError, OSError):
+                continue
+    elif sys.platform.startswith("linux"):
+        home = Path.home()
+        candidates.extend([
+            home / "Godot", home / "godot",
+            home / "bin" / "godot", home / "bin" / "Godot",
+            Path("/opt/godot/godot"), Path("/opt/godot/Godot"),
+        ])
+    for c in candidates:
+        if c.exists() and os.access(c, os.X_OK):
+            return str(c)
+    return None
 
 
 # ---------------------------------------------------------------------------
