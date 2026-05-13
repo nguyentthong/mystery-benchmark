@@ -165,6 +165,10 @@ func _do_render(cmd: Dictionary) -> void:
 	# offscreen; UPDATE_ONCE + frame_post_draw is the recommended sync.
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	await RenderingServer.frame_post_draw
+	# One more frame for good measure -- some drivers seem to delay the
+	# very first draw of a freshly-mutated SubViewport.
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	await RenderingServer.frame_post_draw
 
 	var tex := _viewport.get_texture()
 	if tex == null:
@@ -174,13 +178,44 @@ func _do_render(cmd: Dictionary) -> void:
 	if img == null:
 		print("ERR null_image")
 		return
-	# Diagnostic: if the texture came back fully zero, the scene didn't
-	# render. Surface it on stderr so we can tell at a glance.
-	if _image_is_blank(img):
-		push_warning("[render] texture is blank after capture (camera or scene issue)")
+
+	_dump_diagnostics(img)
+
 	var png_bytes: PackedByteArray = img.save_png_to_buffer()
 	var b64: String = Marshalls.raw_to_base64(png_bytes)
 	print("RENDER ", b64)
+
+
+func _dump_diagnostics(img: Image) -> void:
+	# Print everything useful to stderr so the Python wrapper's stderr
+	# drain surfaces it for us. Helps diagnose black-image issues.
+	var n_objects := _builder.get_child_count()
+	var n_overlays := _overlays.get_child_count()
+	var vp_size := _viewport.size
+	var img_size := Vector2i(img.get_width(), img.get_height())
+	var cam_pos := _camera.global_position
+	var cam_basis := _camera.global_transform.basis
+	var blank := _image_is_blank(img)
+	var sample_centre: Color = img.get_pixel(img.get_width() / 2, img.get_height() / 2)
+	var sample_tl:     Color = img.get_pixel(0, 0)
+	var sample_br:     Color = img.get_pixel(img.get_width() - 1, img.get_height() - 1)
+	push_warning("[render-diag] viewport_size=%s img_size=%s room_children=%d overlay_children=%d cam_pos=%s blank=%s tl=%s centre=%s br=%s" % [
+		vp_size, img_size, n_objects, n_overlays, cam_pos, blank,
+		sample_tl, sample_centre, sample_br,
+	])
+	# Walk the room mount once and print bounding info for the first few
+	# children so we can tell whether room_builder actually emitted
+	# geometry (MeshInstance3D nodes).
+	var mesh_count := 0
+	for child in _builder.get_children():
+		if child is MeshInstance3D:
+			mesh_count += 1
+		if mesh_count <= 3:
+			push_warning("[render-diag]   room_child[%d] type=%s name=%s pos=%s" % [
+				mesh_count, child.get_class(), child.name,
+				(child as Node3D).global_position if child is Node3D else "n/a",
+			])
+	push_warning("[render-diag] total_mesh_instances=%d" % mesh_count)
 
 
 func _image_is_blank(img: Image) -> bool:
