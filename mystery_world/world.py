@@ -115,6 +115,15 @@ class WorldState:
     route_constraints: list[RouteConstraint] = field(default_factory=list)
     anchor_events: dict[str, int] = field(default_factory=dict)
 
+    # --- Canonical itinerary (M5) ---
+    # A deterministic action sequence emitted by the generator that, when
+    # replayed against a fresh env, visits every room, examines every
+    # accessible evidence, re-visits at least one room hosting temporally-
+    # relevant evidence, and ends with the correct ACCUSE. Used by the
+    # temporal-necessity audit and as the oracle-itinerary track in the
+    # 2x2 confound-isolation evaluation. Each entry: {"action": str, "kwargs": dict}.
+    canonical_itinerary: list[dict[str, Any]] = field(default_factory=list)
+
 
     def get_culprit(self) -> Character | None:
         return self.characters.get(self.culprit_id)
@@ -149,6 +158,7 @@ class WorldState:
             "witness_statements": [w.to_dict() for w in self.witness_statements],
             "route_constraints": [r.to_dict() for r in self.route_constraints],
             "anchor_events": self.anchor_events,
+            "canonical_itinerary": self.canonical_itinerary,
         }
 
 
@@ -174,6 +184,7 @@ class WorldState:
             freshness_threshold=d.get("freshness_threshold", 2.0),
             anchor_events=d.get("anchor_events", {}),
             motive=d["motive"],
+            canonical_itinerary=d.get("canonical_itinerary", []),
         )
         ws.locations = {k: Location.from_dict(v) for k, v in d["locations"].items()}
         ws.characters = {k: Character.from_dict(v) for k, v in d["characters"].items()}

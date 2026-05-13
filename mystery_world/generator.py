@@ -1169,6 +1169,7 @@ def generate_mystery(
     seed: int,
     asset_pool: AssetPool | None = None,
     max_retries: int = 10,
+    audit_temporal_necessity: bool = False,
 ) -> WorldState:
     """
     Generate a complete, solvable mystery world.
@@ -1183,7 +1184,11 @@ def generate_mystery(
         Name/template pools (defaults to built-in originals).
     max_retries: int
         Number of attempts before raising (retries with incremented seed).
-    
+    audit_temporal_necessity: bool
+        If True (M5), additionally reject episodes whose canonical itinerary
+        does not surface any cross-observation VisualState change. This is
+        the upstream requirement for the visual-temporal benchmark.
+
     Returns
     ----------
     WorldState
@@ -1498,11 +1503,25 @@ def generate_mystery(
                     reason=str(rng.choice(constraint_reasons)),
                 ))
         state.route_constraints = route_constraints
-        
+
         # 10. Verify solvability
         check = verify_solvability(state)
-        if check["solvable"]:
-            return state
-    
+        if not check["solvable"]:
+            continue
+
+        # 11. Canonical itinerary (M5). Always emitted; downstream evaluation
+        # (oracle-itinerary track of the 2x2 matrix) consumes it. Cheap.
+        from mystery_world.canonical import generate_canonical_itinerary
+        state.canonical_itinerary = generate_canonical_itinerary(state)
+
+        # 12. Optional temporal-necessity audit (M5). Only used by the
+        # visual-temporal benchmark variant; default text benchmark skips.
+        if audit_temporal_necessity:
+            from mystery_world.canonical import audit_episode
+            passed, _reason = audit_episode(state)
+            if not passed:
+                continue
+        return state
+
     # If we exhausted retries, return last attempt with a warning
-    return state   # type: ignore[possibly-undefined] 
+    return state   # type: ignore[possibly-undefined]
