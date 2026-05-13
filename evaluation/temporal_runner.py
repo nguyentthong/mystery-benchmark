@@ -39,6 +39,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from evaluation.probes import EpisodeProbes, extract_probes, score_probes
 from mystery_world.narrator import render_initial_briefing
 from mystery_world.world import AgentAction, ActionResult, MysteryEnvironment, WorldState
 
@@ -80,6 +81,9 @@ class ConditionResult:
     accusation_correct: bool
     n_steps: int
     accusation_kwargs: dict[str, str] = field(default_factory=dict)
+    # M7 per-skill probe scores. Each metric is optional; only present
+    # when the agent implements the corresponding probe method.
+    probe_scores: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -136,11 +140,18 @@ def run_condition(
     agent: Agent,
     condition: str,
     visual_mode: bool = True,
+    probes: EpisodeProbes | None = None,
 ) -> ConditionResult:
     """Run one episode under one of the four conditions.
 
     The state is deep-copied so callers can re-run other conditions on the
     same seed without observing mutations from a prior run.
+
+    If ``probes`` is provided, the M7 probe methods on the agent are called
+    after the episode and their scores are attached to ``probe_scores``.
+    The probe inputs are the same across all four conditions (extracted
+    from a canonical replay), so condition-induced score differences
+    reflect the agent's internal state, not different probe questions.
     """
     if condition not in CONDITIONS:
         raise ValueError(f"unknown condition {condition!r}; expected one of {CONDITIONS}")
@@ -188,11 +199,16 @@ def run_condition(
             if action == AgentAction.ACCUSE:
                 break
 
+    probe_scores: dict[str, float] = {}
+    if probes is not None:
+        probe_scores = score_probes(agent, probes)
+
     return ConditionResult(
         condition=condition,
         accusation_correct=bool(env.accusation_correct),
         n_steps=len(history) - 1,
         accusation_kwargs=accuse_kwargs,
+        probe_scores=probe_scores,
     )
 
 
@@ -204,15 +220,23 @@ def run_2x2(
     state: WorldState,
     agent_factory,
     visual_mode: bool = True,
+    with_probes: bool = False,
 ) -> EpisodeMatrix:
     """Run all four conditions on ``state`` and return per-condition results.
 
     ``agent_factory`` is called once per condition with ``state`` to produce
-    a fresh agent. Stateless agents may ignore the argument."""
+    a fresh agent. Stateless agents may ignore the argument.
+
+    If ``with_probes=True``, M7 probes are extracted once (from a canonical
+    replay) and scored per condition. The same probe inputs are used across
+    all four conditions, so per-condition probe-score differences reflect
+    the agent's internal state rather than different probe questions.
+    """
+    probes = extract_probes(state) if with_probes else None
     matrix = EpisodeMatrix(seed=state.seed)
     for cond in CONDITIONS:
         agent = agent_factory(state)
-        result = run_condition(state, agent, cond, visual_mode=visual_mode)
+        result = run_condition(state, agent, cond, visual_mode=visual_mode, probes=probes)
         matrix.per_condition[cond] = result
     return matrix
 
