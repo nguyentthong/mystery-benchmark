@@ -117,15 +117,14 @@ func _process(_delta: float) -> void:
 
 
 func _handle_command(raw: String) -> void:
+	printerr("[render] got command (len=", raw.length(), ")")
 	var parsed = JSON.parse_string(raw)
 	if parsed == null or typeof(parsed) != TYPE_DICTIONARY:
-		# Log the offending payload's prefix + length to stderr so we can
-		# tell at a glance whether it's truncation vs a malformed message.
-		push_error("[render] bad JSON (len=" + str(raw.length())
-			+ ", head=" + raw.substr(0, 120) + ")")
+		printerr("[render] bad JSON (len=", raw.length(), ", head=", raw.substr(0, 120), ")")
 		print("ERR bad_json")
 		return
 	var cmd: String = String(parsed.get("cmd", ""))
+	printerr("[render] cmd=", cmd)
 	if cmd == "render":
 		await _do_render(parsed)
 	elif cmd == "shutdown":
@@ -136,12 +135,14 @@ func _handle_command(raw: String) -> void:
 
 
 func _do_render(cmd: Dictionary) -> void:
+	printerr("[render] do_render start")
 	var room: Dictionary = cmd.get("room", {})
 	var overlays: Array = cmd.get("evidence_overlays", [])
 	var width: int = int(cmd.get("width", 720))
 	var height: int = int(cmd.get("height", 720))
 
 	_viewport.size = Vector2i(width, height)
+	printerr("[render] viewport sized to ", _viewport.size)
 
 	# Tear down the previous frame's scene contents.
 	for child in _builder.get_children():
@@ -152,30 +153,39 @@ func _do_render(cmd: Dictionary) -> void:
 		child.queue_free()
 
 	if not room.is_empty():
+		printerr("[render] building room w=", room.get("width"), " h=", room.get("height"),
+			" objects=", room.get("objects", []).size(),
+			" characters=", room.get("characters", []).size())
 		_builder.build_from(room, TILE_M)
 		var room_w: float = float(room.get("width", 1))
 		var room_h: float = float(room.get("height", 1))
 		_setup_camera(room_w * TILE_M, room_h * TILE_M)
+		printerr("[render] camera at ", _camera.global_position, " builder children=", _builder.get_child_count())
+	else:
+		printerr("[render] room payload empty")
 
 	_spawn_overlays(overlays)
+	printerr("[render] spawned ", _overlays.get_child_count(), " overlays")
 
-	# Make absolutely sure the SubViewport renders a fresh frame and that we
-	# wait for the GPU to actually finish drawing before sampling its
-	# texture. UPDATE_ALWAYS alone is unreliable when the SubViewport is
-	# offscreen; UPDATE_ONCE + frame_post_draw is the recommended sync.
-	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
-	await RenderingServer.frame_post_draw
-	# One more frame for good measure -- some drivers seem to delay the
-	# very first draw of a freshly-mutated SubViewport.
-	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
-	await RenderingServer.frame_post_draw
+	# Force the SubViewport to render now. We try the frame_post_draw signal
+	# pattern first; if it doesn't fire within a couple of process_frame
+	# yields we just sample whatever is in the texture anyway. Awaiting
+	# frame_post_draw from inside _process can deadlock if the engine isn't
+	# actively running a render pass, so the fallback is critical.
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await get_tree().process_frame
+	printerr("[render] awaited 3 process_frames")
 
 	var tex := _viewport.get_texture()
 	if tex == null:
+		printerr("[render] null texture")
 		print("ERR null_texture")
 		return
 	var img: Image = tex.get_image()
 	if img == null:
+		printerr("[render] null image")
 		print("ERR null_image")
 		return
 
@@ -183,39 +193,36 @@ func _do_render(cmd: Dictionary) -> void:
 
 	var png_bytes: PackedByteArray = img.save_png_to_buffer()
 	var b64: String = Marshalls.raw_to_base64(png_bytes)
+	printerr("[render] emitting RENDER (b64 len=", b64.length(), ")")
 	print("RENDER ", b64)
 
 
 func _dump_diagnostics(img: Image) -> void:
-	# Print everything useful to stderr so the Python wrapper's stderr
-	# drain surfaces it for us. Helps diagnose black-image issues.
+	# printerr writes directly to stderr (bypasses Godot's warning routing,
+	# which we suspected was being swallowed). Helps diagnose black-image
+	# issues without depending on push_warning behaviour.
 	var n_objects := _builder.get_child_count()
 	var n_overlays := _overlays.get_child_count()
 	var vp_size := _viewport.size
 	var img_size := Vector2i(img.get_width(), img.get_height())
 	var cam_pos := _camera.global_position
-	var cam_basis := _camera.global_transform.basis
 	var blank := _image_is_blank(img)
 	var sample_centre: Color = img.get_pixel(img.get_width() / 2, img.get_height() / 2)
 	var sample_tl:     Color = img.get_pixel(0, 0)
 	var sample_br:     Color = img.get_pixel(img.get_width() - 1, img.get_height() - 1)
-	push_warning("[render-diag] viewport_size=%s img_size=%s room_children=%d overlay_children=%d cam_pos=%s blank=%s tl=%s centre=%s br=%s" % [
-		vp_size, img_size, n_objects, n_overlays, cam_pos, blank,
-		sample_tl, sample_centre, sample_br,
-	])
-	# Walk the room mount once and print bounding info for the first few
-	# children so we can tell whether room_builder actually emitted
-	# geometry (MeshInstance3D nodes).
+	printerr("[render-diag] viewport_size=", vp_size, " img_size=", img_size,
+		" room_children=", n_objects, " overlay_children=", n_overlays,
+		" cam_pos=", cam_pos, " blank=", blank,
+		" tl=", sample_tl, " centre=", sample_centre, " br=", sample_br)
 	var mesh_count := 0
 	for child in _builder.get_children():
 		if child is MeshInstance3D:
 			mesh_count += 1
 		if mesh_count <= 3:
-			push_warning("[render-diag]   room_child[%d] type=%s name=%s pos=%s" % [
-				mesh_count, child.get_class(), child.name,
-				(child as Node3D).global_position if child is Node3D else "n/a",
-			])
-	push_warning("[render-diag] total_mesh_instances=%d" % mesh_count)
+			printerr("[render-diag]   room_child[", mesh_count, "] type=", child.get_class(),
+				" name=", child.name,
+				" pos=", ((child as Node3D).global_position if child is Node3D else "n/a"))
+	printerr("[render-diag] total_mesh_instances=", mesh_count)
 
 
 func _image_is_blank(img: Image) -> bool:
