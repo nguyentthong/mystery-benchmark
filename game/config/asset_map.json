@@ -1,0 +1,69 @@
+{
+  "version": 5,
+  "_doc": [
+    "Maps logical entity kinds to .glb model paths under game/assets/kenney/.",
+    "Each entry can be a bare path string OR {asset, scale}.",
+    "Procedural shapes (built in code) take priority over this map for many",
+    "small/distinctive items (cleaver, candlestick, fireplace, curtain, etc.)."
+  ],
+  "asset_root": "res://assets/kenney/",
+  "characters": {
+    "default_scale": 2.5,
+    "default":  "characters/character-male-a.glb",
+    "by_role": {
+      "suspect":  {"asset": "characters/character-male-a.glb",   "scale": 2.5},
+      "innocent": {"asset": "characters/character-female-c.glb", "scale": 2.5},
+      "witness":  {"asset": "characters/character-male-b.glb",   "scale": 2.5},
+      "victim":   {"asset": "characters/character-female-b.glb", "scale": 2.5}
+    }
+  },
+  "objects": {
+    "default_scale": 1.0,
+    "default": {"asset": "furniture/cardboardBoxClosed.glb", "scale": 1.0},
+    "patterns": [
+      {"contains": "side table",       "asset": "furniture/sideTable.glb",         "scale": 1.5},
+      {"contains": "writing desk",     "asset": "furniture/desk.glb",              "scale": 1.5},
+      {"contains": "desk",             "asset": "furniture/desk.glb",              "scale": 1.5},
+      {"contains": "armchair",         "asset": "furniture/loungeChair.glb",       "scale": 1.7},
+      {"contains": "lounge",           "asset": "furniture/loungeSofa.glb",        "scale": 1.6},
+      {"contains": "sofa",             "asset": "furniture/loungeSofa.glb",        "scale": 1.6},
+      {"contains": "coat rack",        "asset": "furniture/coatRackStanding.glb",  "scale": 1.0},
+      {"contains": "hat stand",        "asset": "furniture/coatRackStanding.glb",  "scale": 1.0},
+      {"contains": "umbrella stand",   "asset": "furniture/coatRack.glb",          "scale": 1.0},
+      {"contains": "floor lamp",       "asset": "furniture/lampSquareFloor.glb",   "scale": 1.0},
+      {"contains": "table lamp",       "asset": "furniture/lampSquareTable.glb",   "scale": 1.0},
+      {"contains": "lamp",             "asset": "furniture/lampRoundFloor.glb",    "scale": 1.0},
+      {"contains": "shelf of books",   "asset": "furniture/bookcaseOpen.glb",      "scale": 1.0},
+      {"contains": "bookcase",         "asset": "furniture/bookcaseOpen.glb",      "scale": 1.0},
+      {"contains": "bookshelf",        "asset": "furniture/bookcaseOpen.glb",      "scale": 1.0},
+      {"contains": "wooden stool",     "asset": "furniture/stoolBar.glb",          "scale": 1.0},
+      {"contains": "footstool",        "asset": "furniture/stoolBarSquare.glb",    "scale": 2.2},
+      {"contains": "wooden stool",     "asset": "furniture/stoolBar.glb",          "scale": 4.5},
+      {"contains": "stool",            "asset": "furniture/stoolBar.glb",          "scale": 4.5},
+      {"contains": "wall mirror",      "asset": "furniture/bathroomMirror.glb",    "scale": 1.4},
+      {"contains": "mirror",           "asset": "furniture/bathroomMirror.glb",    "scale": 1.4},
+      {"contains": "storage trunk",    "asset": "furniture/cardboardBoxClosed.glb","scale": 1.5},
+      {"contains": "trunk",            "asset": "furniture/cardboardBoxClosed.glb","scale": 1.5},
+      {"contains": "serving tray",     "asset": "furniture/tableCoffee.glb",       "scale": 1.2},
+      {"contains": "porcelain vase",   "asset": "furniture/pottedPlant.glb",       "scale": 1.3},
+      {"contains": "vase",             "asset": "furniture/pottedPlant.glb",       "scale": 1.3},
+      {"contains": "old radiator",     "asset": "furniture/dryer.glb",             "scale": 1.1},
+      {"contains": "radiator",         "asset": "furniture/dryer.glb",             "scale": 1.1},
+      {"contains": "wicker basket",    "asset": "furniture/cardboardBoxOpen.glb",  "scale": 1.2},
+      {"contains": "basket",           "asset": "furniture/cardboardBoxOpen.glb",  "scale": 1.2},
+      {"contains": "worn rug",         "asset": "furniture/rugRectangle.glb",      "scale": 1.5},
+      {"contains": "rug",              "asset": "furniture/rugRectangle.glb",      "scale": 1.5},
+      {"contains": "window ledge",     "asset": "furniture/wallWindow.glb",        "scale": 1.0},
+      {"contains": "window",           "asset": "furniture/wallWindow.glb",        "scale": 1.0},
+      {"contains": "scratched painting", "asset": "furniture/wallWindow.glb",      "scale": 1.0},
+      {"contains": "painting",         "asset": "furniture/wallWindow.glb",        "scale": 1.0},
+      {"contains": "frame",            "asset": "furniture/wallWindow.glb",        "scale": 1.0},
+      {"contains": "table",            "asset": "furniture/tableCoffee.glb",       "scale": 1.0},
+      {"contains": "chair",            "asset": "furniture/chair.glb",             "scale": 1.7},
+      {"contains": "safe",             "asset": "furniture/cabinetTelevisionDoors.glb", "scale": 1.1},
+      {"contains": "bouquet",          "asset": "furniture/pottedPlant.glb",       "scale": 1.0},
+      {"contains": "flower",           "asset": "furniture/plantSmall1.glb",       "scale": 1.0},
+      {"contains": "radio",            "asset": "furniture/radio.glb",             "scale": 1.0}
+    ]
+  }
+}

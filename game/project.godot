@@ -1,0 +1,32 @@
+; Engine configuration file.
+;
+; MysteryArena 3D headless renderer.
+;
+; Boots scenes/render.tscn, which reads JSON commands from stdin and writes
+; base64-encoded PNG frames to stdout. Used as a subprocess by the Python
+; env (see mystery_world/godot_render.py) for the visual-temporal benchmark.
+; No interactive player; no WASD; no WebSocket sidecar.
+;
+; Targets Godot 4.3.
+
+config_version=5
+
+[application]
+
+config/name="MysteryArena 3D (render only)"
+config/description="Headless 3D renderer for MysteryArena visual-temporal benchmark."
+run/main_scene="res://scenes/render.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/resizable=true
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+renderer/rendering_method.mobile="mobile"
