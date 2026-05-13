@@ -263,3 +263,71 @@ def aggregate_2x2_results(matrices: list[EpisodeMatrix]) -> dict[str, float]:
         "free_temporal_reasoning_gap":   accuracies["free_correct"] - accuracies["free_shuffled"],
         "n_episodes": float(n),
     }
+
+
+# ---------------------------------------------------------------------------
+# Twin-pair metric (M8)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TwinPairResult:
+    """Per-pair twin-pair eval result.
+
+    ``a_correct`` and ``b_correct`` are the agent's accusation outcomes on
+    each member of the pair (run under ``condition``). ``both_correct``
+    is the headline twin-pair metric: an agent that genuinely tracks
+    temporal structure should achieve both, an agent that overfits to
+    a single visual-aging template may achieve at most one.
+    """
+    seed_a: int
+    seed_b: int
+    condition: str
+    a_correct: bool
+    b_correct: bool
+
+    @property
+    def both_correct(self) -> bool:
+        return self.a_correct and self.b_correct
+
+
+def run_twin_pair(
+    pair,
+    agent_factory,
+    condition: str = "oracle_correct",
+    visual_mode: bool = True,
+) -> TwinPairResult:
+    """Run ``condition`` on each half of a TwinPair with a fresh agent.
+
+    A separate agent_factory call per member of the pair ensures the
+    twin metric doesn't accidentally measure cached internal state.
+    """
+    agent_a = agent_factory(pair.a)
+    a_res = run_condition(pair.a, agent_a, condition, visual_mode=visual_mode)
+    agent_b = agent_factory(pair.b)
+    b_res = run_condition(pair.b, agent_b, condition, visual_mode=visual_mode)
+    return TwinPairResult(
+        seed_a=pair.a.seed,
+        seed_b=pair.b.seed,
+        condition=condition,
+        a_correct=a_res.accusation_correct,
+        b_correct=b_res.accusation_correct,
+    )
+
+
+def aggregate_twin_pair_results(results: list[TwinPairResult]) -> dict[str, float]:
+    """Aggregate twin-pair results across pairs."""
+    if not results:
+        return {}
+    n = len(results)
+    both = sum(1 for r in results if r.both_correct)
+    a_only = sum(1 for r in results if r.a_correct and not r.b_correct)
+    b_only = sum(1 for r in results if r.b_correct and not r.a_correct)
+    neither = n - both - a_only - b_only
+    return {
+        "twin_pair_accuracy":  both / n,         # headline
+        "individual_accuracy": (both * 2 + a_only + b_only) / (2 * n),
+        "a_only_correct_frac": a_only / n,
+        "b_only_correct_frac": b_only / n,
+        "neither_correct_frac": neither / n,
+        "n_pairs": float(n),
+    }
