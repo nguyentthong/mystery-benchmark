@@ -38,6 +38,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
@@ -505,6 +506,11 @@ def get_default_renderer() -> GodotRenderer | MockGodotRenderer:
             return _default_renderer
         choice = os.environ.get("MYSTERYARENA_GODOT", "").lower()
         if choice == "mock":
+            print(
+                "[godot_render] MYSTERYARENA_GODOT=mock -- using MockGodotRenderer "
+                "(deterministic striped PNGs, not real 3D).",
+                file=sys.stderr,
+            )
             _default_renderer = MockGodotRenderer()
             return _default_renderer
         if choice == "real":
@@ -512,10 +518,25 @@ def get_default_renderer() -> GodotRenderer | MockGodotRenderer:
             return _default_renderer
         try:
             _default_renderer = GodotRenderer()
+            print(
+                "[godot_render] Using real Godot subprocess.",
+                file=sys.stderr,
+            )
         except GodotRendererError as exc:
-            logger.warning(
-                "Falling back to MockGodotRenderer (Godot unavailable: %s).",
-                exc,
+            # Loud fallback. Without this, users see striped MockGodotRenderer
+            # output in play.py and assume the 3D pipeline is broken, when
+            # really Godot just wasn't reachable.
+            print(
+                f"\n[godot_render] WARNING: Godot subprocess could not start "
+                f"({exc})\n"
+                f"[godot_render] Falling back to MockGodotRenderer -- the image "
+                f"channel will show deterministic striped PNGs, NOT a 3D scene.\n"
+                f"[godot_render] To use the real 3D renderer:\n"
+                f"[godot_render]   - install Godot 4.3+ and put it on PATH, OR\n"
+                f"[godot_render]   - set GODOT_BIN to the binary path. e.g.:\n"
+                f"[godot_render]     export GODOT_BIN=/Applications/Godot.app/Contents/MacOS/Godot\n"
+                f"[godot_render]   then re-run your command.\n",
+                file=sys.stderr,
             )
             _default_renderer = MockGodotRenderer()
         return _default_renderer
