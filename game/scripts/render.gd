@@ -58,6 +58,7 @@ var _stdin_thread: Thread = null
 var _command_queue: Array = []
 var _command_mutex: Mutex = Mutex.new()
 var _shutdown_flag: bool = false
+var _stdin_buffer: String = ""
 
 
 func _ready() -> void:
@@ -69,15 +70,27 @@ func _ready() -> void:
 
 
 func _stdin_loop() -> void:
+	# Godot 4 read_string_from_stdin reads up to a fixed buffer size, NOT a
+	# whole line, so we accumulate chunks and split on newlines ourselves.
+	# Otherwise JSON payloads larger than the buffer get truncated and the
+	# parser sees a fragment.
 	while not _shutdown_flag:
-		var line: String = OS.read_string_from_stdin().strip_edges()
-		if line == "":
-			# EOF or empty line: brief sleep, retry. Empty stdin is harmless.
+		var chunk: String = OS.read_string_from_stdin()
+		if chunk.length() == 0:
 			OS.delay_msec(5)
 			continue
-		_command_mutex.lock()
-		_command_queue.push_back(line)
-		_command_mutex.unlock()
+		_stdin_buffer += chunk
+		while true:
+			var nl_pos: int = _stdin_buffer.find("\n")
+			if nl_pos == -1:
+				break
+			var line: String = _stdin_buffer.substr(0, nl_pos).strip_edges()
+			_stdin_buffer = _stdin_buffer.substr(nl_pos + 1)
+			if line.length() == 0:
+				continue
+			_command_mutex.lock()
+			_command_queue.push_back(line)
+			_command_mutex.unlock()
 
 
 func _process(_delta: float) -> void:
@@ -94,7 +107,10 @@ func _process(_delta: float) -> void:
 func _handle_command(raw: String) -> void:
 	var parsed = JSON.parse_string(raw)
 	if parsed == null or typeof(parsed) != TYPE_DICTIONARY:
-		push_error("[render] bad JSON: " + raw.substr(0, 200))
+		# Log the offending payload's prefix + length to stderr so we can
+		# tell at a glance whether it's truncation vs a malformed message.
+		push_error("[render] bad JSON (len=" + str(raw.length())
+			+ ", head=" + raw.substr(0, 120) + ")")
 		print("ERR bad_json")
 		return
 	var cmd: String = String(parsed.get("cmd", ""))

@@ -22,11 +22,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Show godot[stderr] lines (logged at WARNING) and our own info logs.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 # Force the real Godot backend (override any MOCK setting).
 os.environ["MYSTERYARENA_GODOT"] = "real"

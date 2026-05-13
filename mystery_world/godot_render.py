@@ -311,6 +311,15 @@ class GodotRenderer:
             ) from exc
         atexit.register(self.close)
 
+        # Start a daemon thread that drains stderr so Godot doesn't eventually
+        # block on a full stderr buffer mid-run. Lines come back through the
+        # Python logger at INFO so push_error / bad-JSON diagnostics are
+        # visible without dumping to the terminal directly.
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr, daemon=True
+        )
+        self._stderr_thread.start()
+
         # Wait for READY.
         import time
         deadline = time.monotonic() + ready_timeout_sec
@@ -318,9 +327,8 @@ class GodotRenderer:
             line = self._proc.stdout.readline() if self._proc.stdout else ""
             if not line:
                 if self._proc.poll() is not None:
-                    err = self._proc.stderr.read() if self._proc.stderr else ""
                     raise GodotRendererError(
-                        f"Godot subprocess exited before READY: {err[:500]}"
+                        "Godot subprocess exited before READY (see godot stderr above)."
                     )
                 continue
             if line.strip() == self.READY_TOKEN:
@@ -330,6 +338,20 @@ class GodotRenderer:
         raise GodotRendererError(
             f"Godot did not emit READY within {ready_timeout_sec}s"
         )
+
+    def _drain_stderr(self) -> None:
+        """Background thread: read Godot's stderr line by line and forward
+        each line to the Python logger at WARNING. Prevents the stderr
+        buffer from filling up and blocking the Godot process."""
+        if self._proc is None or self._proc.stderr is None:
+            return
+        try:
+            for line in iter(self._proc.stderr.readline, ""):
+                if not line:
+                    break
+                logger.warning("godot[stderr]: %s", line.rstrip())
+        except Exception:   # pragma: no cover -- thread teardown
+            pass
 
     def render(
         self,
