@@ -50,6 +50,7 @@ const FAMILY_AGING_MESH: Dictionary = {
 }
 
 @onready var _viewport: SubViewport = $RenderViewport
+@onready var _world_env: WorldEnvironment = $RenderViewport/WorldEnv
 @onready var _camera:   Camera3D    = $RenderViewport/Camera
 @onready var _builder:  Node3D      = $RenderViewport/RoomMount
 @onready var _overlays: Node3D      = $RenderViewport/EvidenceOverlays
@@ -62,6 +63,17 @@ var _stdin_buffer: String = ""
 
 
 func _ready() -> void:
+	# Belt and braces against the "SubViewport renders black" quirk:
+	# (1) make the camera explicitly current within the SubViewport's own
+	#     World3D, (2) attach the WorldEnv's Environment resource to the
+	#     Camera as a fallback so the background colour applies even if
+	#     own_world_3d swallows the WorldEnvironment node, (3) keep
+	#     update_mode = ALWAYS so the SubViewport always renders, and
+	#     additionally request UPDATE_ONCE before each capture below.
+	_camera.current = true
+	if _world_env and _world_env.environment:
+		_camera.environment = _world_env.environment
+
 	print("READY")
 	# Background thread reads stdin so _process can pull commands without
 	# blocking the main render thread on OS.read_string_from_stdin.
@@ -147,18 +159,45 @@ func _do_render(cmd: Dictionary) -> void:
 
 	_spawn_overlays(overlays)
 
-	# Two frames give the SubViewport time to flush the new scene and update
-	# its texture; one is sometimes enough but two is safer across drivers.
-	await get_tree().process_frame
-	await get_tree().process_frame
+	# Make absolutely sure the SubViewport renders a fresh frame and that we
+	# wait for the GPU to actually finish drawing before sampling its
+	# texture. UPDATE_ALWAYS alone is unreliable when the SubViewport is
+	# offscreen; UPDATE_ONCE + frame_post_draw is the recommended sync.
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	await RenderingServer.frame_post_draw
 
-	var img: Image = _viewport.get_texture().get_image()
+	var tex := _viewport.get_texture()
+	if tex == null:
+		print("ERR null_texture")
+		return
+	var img: Image = tex.get_image()
 	if img == null:
 		print("ERR null_image")
 		return
+	# Diagnostic: if the texture came back fully zero, the scene didn't
+	# render. Surface it on stderr so we can tell at a glance.
+	if _image_is_blank(img):
+		push_warning("[render] texture is blank after capture (camera or scene issue)")
 	var png_bytes: PackedByteArray = img.save_png_to_buffer()
 	var b64: String = Marshalls.raw_to_base64(png_bytes)
 	print("RENDER ", b64)
+
+
+func _image_is_blank(img: Image) -> bool:
+	# Probe a handful of pixels; if all are zero (or alpha-only), the
+	# viewport almost certainly never rendered.
+	if img.get_width() < 2 or img.get_height() < 2:
+		return false
+	var samples: Array = [
+		img.get_pixel(0, 0),
+		img.get_pixel(img.get_width() - 1, 0),
+		img.get_pixel(0, img.get_height() - 1),
+		img.get_pixel(img.get_width() / 2, img.get_height() / 2),
+	]
+	for c in samples:
+		if c.r > 0.01 or c.g > 0.01 or c.b > 0.01:
+			return false
+	return true
 
 
 func _setup_camera(world_w: float, world_h: float) -> void:
