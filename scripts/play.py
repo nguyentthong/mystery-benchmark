@@ -5,11 +5,14 @@ Usage:
     uv run scripts/play.py                          # random MEDIUM case
     uv run scripts/play.py --level EASY --seed 7    # specific difficulty + seed
     uv run scripts/play.py --load path/to/world.json
+    uv run scripts/play.py --visual --audit         # visual-temporal benchmark
 """
 
 from __future__ import annotations
 
 import argparse
+import io
+import os
 import sys
 from pathlib import Path
 
@@ -20,6 +23,77 @@ from mystery_world.generator import generate_mystery
 from mystery_world.narrator import render_initial_briefing, render_step_observation
 from mystery_world.world import AgentAction, MysteryEnvironment, WorldState
 from agents.maximum_score_oracle_agent import OracleAgent
+
+
+# ---------------------------------------------------------------------------
+# Visual channel display (M1-M9 visual-temporal benchmark)
+# ---------------------------------------------------------------------------
+
+class VisualDisplay:
+    """Live pygame window that shows the rendered post-action observation.
+
+    Decode the PNG bytes returned by env.step().image, upscale to fill the
+    window, blit, flip. Pumps events between updates so the window stays
+    responsive; the player still drives the game from the terminal REPL.
+    """
+
+    def __init__(self, window_size: tuple[int, int] = (720, 720)) -> None:
+        # Force a real SDL driver -- the renderer's headless _ensure_pygame
+        # sets the dummy driver as a default, but we need a visible window
+        # here. Drop both env vars first so SDL picks a real driver.
+        os.environ.pop("SDL_VIDEODRIVER", None)
+        os.environ.pop("SDL_AUDIODRIVER", None)
+        import pygame
+        self._pygame = pygame
+        pygame.display.init()
+        pygame.font.init()
+        self.window_size = window_size
+        self.screen = pygame.display.set_mode(window_size)
+        pygame.display.set_caption("MysteryArena -- visual channel")
+        self.font = pygame.font.SysFont(None, 22)
+
+    def update(self, png_bytes: bytes | None, status: str = "") -> None:
+        if png_bytes is None:
+            return
+        pygame = self._pygame
+        from PIL import Image
+        img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+        surf = pygame.image.frombuffer(img.tobytes(), img.size, "RGB")
+        win_w, win_h = self.window_size
+        text_h = 30
+        max_h = win_h - text_h
+        ratio = min(win_w / img.size[0], max_h / img.size[1])
+        new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+        surf = pygame.transform.smoothscale(surf, new_size)
+        self.screen.fill((18, 16, 22))
+        x = (win_w - new_size[0]) // 2
+        y = (max_h - new_size[1]) // 2
+        self.screen.blit(surf, (x, y))
+        if status:
+            text = self.font.render(status, True, (220, 220, 220))
+            self.screen.blit(text, (8, win_h - text_h + 5))
+        pygame.display.flip()
+        # Drain events so the OS doesn't mark the window as unresponsive.
+        for _ in pygame.event.get():
+            pass
+
+    def update_clip(
+        self,
+        frames: list[bytes],
+        status: str = "",
+        per_frame_ms: int = 200,
+    ) -> None:
+        """Play N frames sequentially, settling on the last."""
+        pygame = self._pygame
+        if not frames:
+            return
+        for f in frames[:-1]:
+            self.update(f, status + " [clip]")
+            pygame.time.wait(per_frame_ms)
+        self.update(frames[-1], status)
+
+    def close(self) -> None:
+        self._pygame.display.quit()
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +184,11 @@ def _parse_command(raw: str) -> tuple[AgentAction, dict] | None:
 # Main game loop
 # ---------------------------------------------------------------------------
 
-def play(env: MysteryEnvironment, save_dir: Path | None = None) -> None:
+def play(
+    env: MysteryEnvironment,
+    save_dir: Path | None = None,
+    display: VisualDisplay | None = None,
+) -> None:
     state = env.state
 
     # Build quick-reference data
@@ -257,6 +335,15 @@ def play(env: MysteryEnvironment, save_dir: Path | None = None) -> None:
     # ── Initial briefing ────────────────────────────────────────────────
     briefing = render_initial_briefing(env)
     _print_box(briefing)
+
+    # Initial visual observation
+    if display is not None:
+        loc = env.get_current_location()
+        loc_name = loc.name if loc else "?"
+        display.update(
+            env.get_observation_image(),
+            status=f"{loc_name}  |  step {env.state.current_step}  |  budget {env.budget_remaining}",
+        )
 
     # ── REPL ────────────────────────────────────────────────────────────
     while not env.is_solved:
@@ -410,6 +497,20 @@ def play(env: MysteryEnvironment, save_dir: Path | None = None) -> None:
         obs = render_step_observation(env, result.observation)
         _print_result(obs)
 
+        # Refresh the visual channel after every action so the agent's image
+        # observation tracks the env's current_step.
+        if display is not None:
+            loc = env.get_current_location()
+            loc_name = loc.name if loc else "?"
+            status = (
+                f"{loc_name}  |  step {env.state.current_step}  |  "
+                f"budget {env.budget_remaining}  |  {action.name}"
+            )
+            if len(result.frames) > 1:
+                display.update_clip(result.frames, status=status)
+            else:
+                display.update(result.image, status=status)
+
     # ── Auto-save on episode end ─────────────────────────────────────────
     if save_dir:
         saved = env.save_session(save_dir)
@@ -486,6 +587,29 @@ def main() -> None:
         metavar="DIR",
         help="Directory to save session (world + transcript). Auto-saved on quit/game-over.",
     )
+    parser.add_argument(
+        "--visual",
+        action="store_true",
+        help="Enable the visual-temporal benchmark variant: visual_mode=True "
+             "(text channel strips freshness / death-time vocabulary) plus a "
+             "live pygame window showing the rendered post-action observation.",
+    )
+    parser.add_argument(
+        "--audit",
+        action="store_true",
+        help="Use audit_temporal_necessity=True when generating, so the chosen "
+             "episode is guaranteed to surface a cross-observation VisualState "
+             "change (M5). Implied recommended with --visual.",
+    )
+    parser.add_argument(
+        "--clip-frames",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Clip frame count for time-elapsed actions (WAIT, MOVE, TALK_TO) "
+             "under --visual. N=1 (default) returns a single image per action; "
+             "N>=2 plays a short clip in the window.",
+    )
     args = parser.parse_args()
 
     import datetime
@@ -510,16 +634,36 @@ def main() -> None:
         config = COMPLEXITY_PRESETS[level]
         multi = "  (multi-evidence)" if ex_data.get("multi_evidence") else ""
         print(f"Loading example '{args.example}' — {ex_data['complexity']} case, seed={seed}{multi} ...")
-        world_state = generate_mystery(config, seed)
+        world_state = generate_mystery(
+            config, seed, audit_temporal_necessity=args.audit
+        )
     else:
         import random
         seed = args.seed if args.seed is not None else random.randint(0, 999999)
         level = LEVEL_NAMES[args.level.upper()]
         config = COMPLEXITY_PRESETS[level]
-        print(f"Generating a {args.level} mystery (seed={seed}) ...")
-        world_state = generate_mystery(config, seed)
+        if args.audit:
+            print(f"Generating an AUDITED {args.level} mystery (seed={seed}) ...")
+        else:
+            print(f"Generating a {args.level} mystery (seed={seed}) ...")
+        world_state = generate_mystery(
+            config, seed, audit_temporal_necessity=args.audit
+        )
 
-    env = MysteryEnvironment(world_state)
+    # Optional clip dispatch (M9) for time-elapsed actions under --visual.
+    clip_dispatch: dict[AgentAction, int] | None = None
+    if args.visual and args.clip_frames > 1:
+        clip_dispatch = {
+            AgentAction.WAIT:    args.clip_frames,
+            AgentAction.MOVE:    args.clip_frames,
+            AgentAction.TALK_TO: args.clip_frames,
+        }
+
+    env = MysteryEnvironment(
+        world_state,
+        visual_mode=args.visual,
+        clip_dispatch=clip_dispatch,
+    )
 
     # Determine save directory
     save_dir: Path | None = None
@@ -549,7 +693,26 @@ def main() -> None:
     else:
         print("NPC interviews: deterministic fallback (pass --npc-provider to use an LLM)")
 
-    play(env, save_dir=save_dir)
+    # Open the visual window if --visual was passed. If pygame can't reach
+    # a display (headless server, no $DISPLAY), fall back to text-only and
+    # warn instead of crashing.
+    display: VisualDisplay | None = None
+    if args.visual:
+        try:
+            display = VisualDisplay()
+            print("Visual channel: pygame window open.")
+        except Exception as exc:
+            print(
+                f"WARNING: could not open pygame display ({exc}). Falling back "
+                f"to text-only. (Try unsetting SDL_VIDEODRIVER, or use "
+                f"`python scripts/save_visual_frames.py` for headless setups.)"
+            )
+
+    try:
+        play(env, save_dir=save_dir, display=display)
+    finally:
+        if display is not None:
+            display.close()
 
 
 if __name__ == "__main__":
