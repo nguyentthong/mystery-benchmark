@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import io
 import os
+import weakref
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -77,27 +78,41 @@ def _ensure_pygame() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Layout cache (per-process, keyed by location id)
+# Per-env layout cache
 # ---------------------------------------------------------------------------
+#
+# The layout is mutated in place across renders (positions accumulate as
+# NPCs enter/leave the room over time), so the cache must be tied to the
+# specific env that owns the state. Keying a plain dict by id(env) suffers
+# from CPython id-reuse (a recycled memory address can produce a stale
+# hit); WeakKeyDictionary entries are removed automatically when their
+# env is GC'd, so id-reuse cannot resurrect a stale layout.
+# (WorldState is a dataclass and not hashable by default, so we key by
+# the env wrapper rather than the state itself.)
 
-_layout_cache: dict[str, RoomLayout] = {}
-_door_pairings_cache: dict[int, dict[str, dict[str, str]]] = {}
+_env_layout_caches: "weakref.WeakKeyDictionary[MysteryEnvironment, dict[str, RoomLayout]]" = weakref.WeakKeyDictionary()
+_env_pairings_caches: "weakref.WeakKeyDictionary[MysteryEnvironment, dict[str, dict[str, str]]]" = weakref.WeakKeyDictionary()
 
 
 def _pairings_for(env: MysteryEnvironment) -> dict[str, dict[str, str]]:
-    """Cache door pairings by world-state seed so a fresh world recomputes."""
-    key = id(env.state)
-    if key not in _door_pairings_cache:
-        _door_pairings_cache[key] = compute_door_pairings(env.state)
-    return _door_pairings_cache[key]
+    """Cache door pairings per env."""
+    cached = _env_pairings_caches.get(env)
+    if cached is None:
+        cached = compute_door_pairings(env.state)
+        _env_pairings_caches[env] = cached
+    return cached
 
 
 def _layout_for(env: MysteryEnvironment, location_id: str) -> RoomLayout:
-    if location_id not in _layout_cache:
+    layout_cache = _env_layout_caches.get(env)
+    if layout_cache is None:
+        layout_cache = {}
+        _env_layout_caches[env] = layout_cache
+    if location_id not in layout_cache:
         loc = env.state.locations[location_id]
         sides = _pairings_for(env).get(location_id, {})
-        _layout_cache[location_id] = build_room_layout(loc, neighbor_sides=sides)
-    layout = _layout_cache[location_id]
+        layout_cache[location_id] = build_room_layout(loc, neighbor_sides=sides)
+    layout = layout_cache[location_id]
     # Refresh dynamic content (NPCs may have moved into / out of this room)
     loc = env.state.locations[location_id]
     used: set[tuple[int, int]] = set(layout.doors.keys())

@@ -67,6 +67,11 @@ class ActionResult:
     # is one of VisualState.{BRIGHT,DULL,FADED}.name (or None for evidence
     # with no temporal relevance). Used by the visual-temporal benchmark.
     visible_evidence: list[dict[str, Any]] = field(default_factory=list)
+    # PNG-encoded rendering of the agent's current room at this observation
+    # time. Populated only when env.visual_mode is True; None otherwise (so
+    # text-only runs pay no rendering cost). Deterministic given
+    # (seed, action_history).
+    image: bytes | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -330,6 +335,7 @@ class MysteryEnvironment:
 
         # Post-action visual-channel snapshot of the agent's current POV.
         result.visible_evidence = self._compute_visible_evidence()
+        result.image = self._render_observation_image()
 
         return result
 
@@ -338,6 +344,24 @@ class MysteryEnvironment:
         without taking an action. Use this for the initial observation before
         any step() call (e.g. alongside render_initial_briefing)."""
         return self._compute_visible_evidence()
+
+    def get_observation_image(self) -> bytes | None:
+        """Return the PNG-encoded rendering of the agent's current room, or
+        None if the env was constructed with visual_mode=False. Use this for
+        the initial observation before any step() call."""
+        return self._render_observation_image()
+
+    def _render_observation_image(self) -> bytes | None:
+        """Render the current observation as PNG bytes, or return None when
+        the visual channel is disabled. Imported lazily to avoid the
+        renderer's pygame dependency at module load."""
+        if not self.visual_mode:
+            return None
+        # Lazy import avoids a circular dependency: renderer imports
+        # MysteryEnvironment for type hints, and would otherwise pull pygame
+        # into every text-only run.
+        from mystery_world.renderer import render_observation_png
+        return render_observation_png(self)
 
     def _compute_visible_evidence(self) -> list[dict[str, Any]]:
         """Snapshot of every evidence visible from the agent's current room.
